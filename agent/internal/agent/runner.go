@@ -75,6 +75,9 @@ func (r *Runner) EnsureToken(ctx context.Context, enrollToken string) error {
 		}
 	}
 	if enrollToken == "" {
+		enrollToken = os.Getenv("OBSERVER_ENROLL_TOKEN")
+	}
+	if enrollToken == "" {
 		return errors.New("agent not enrolled: set OBSERVER_ENROLL_TOKEN or pass --enroll-token")
 	}
 
@@ -190,6 +193,14 @@ func (r *Runner) enrollRequest() hubclient.EnrollRequest {
 		Mounts:       make([]hubclient.EnrollMount, 0, len(r.Config.Mounts)),
 	}
 	for _, mount := range r.Config.Mounts {
+		include := mount.Include
+		if include == nil {
+			include = []string{}
+		}
+		exclude := mount.Exclude
+		if exclude == nil {
+			exclude = []string{}
+		}
 		request.Mounts = append(request.Mounts, hubclient.EnrollMount{
 			MountID:       mount.ID,
 			Label:         mount.Label,
@@ -198,8 +209,8 @@ func (r *Runner) enrollRequest() hubclient.EnrollRequest {
 			FSKind:        mount.FSKind,
 			CaseSensitive: mount.CaseSensitive,
 			Unicode:       mount.Unicode,
-			Include:       mount.Include,
-			Exclude:       mount.Exclude,
+			Include:       include,
+			Exclude:       exclude,
 			RulesHash:     mount.RulesHash,
 			Limits: map[string]any{
 				"bytes_per_sec": int64(mount.EffectiveLimits.BytesPerSec),
