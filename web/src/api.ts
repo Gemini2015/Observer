@@ -111,8 +111,78 @@ export interface MountDetail extends MountRef {
     budgetMinutesPerDay: number;
     intervalMinutes: number;
   };
+  repair_allowed?: boolean;
   coverage: Coverage;
   last_job: Job | null;
+}
+
+export interface IssueDetail {
+  id: number;
+  type: string;
+  status: string;
+  confidence: string;
+  evidence: Record<string, unknown> | null;
+  path_key: string;
+  mount_id: string;
+  machine_id: string;
+  target_state: string;
+  target_size: number;
+  expected_hash: string | null;
+  observed_hash: string | null;
+  repair_allowed: boolean;
+}
+
+export interface Replica {
+  path_id: number;
+  machine_id: string;
+  mount_id: string;
+  path_key: string;
+  size: number;
+  last_hashed_at: number | null;
+  confidence: string;
+}
+
+export interface ReplicaResponse {
+  issue_id: number;
+  expected_hash: string | null;
+  repair_allowed: boolean;
+  source_repairable: boolean;
+  replicas: Replica[];
+}
+
+export interface RepairView {
+  id: number;
+  issue_id: number;
+  status: string;
+  expected_hash: string;
+  observed_hash: string | null;
+  error: string | null;
+  quarantine_path: string | null;
+  source: {
+    path_id: number;
+    machine_id: string;
+    mount_id: string;
+    path_key: string;
+    size: number;
+  };
+  target: {
+    path_id: number;
+    machine_id: string;
+    mount_id: string;
+    path_key: string;
+    state: string;
+    size: number;
+  };
+  transfer: {
+    id: number;
+    status: string;
+    size: number;
+    bytes_received: number;
+    expires_at: number;
+  };
+  created_at: number;
+  updated_at: number;
+  finished_at: number | null;
 }
 
 export function formatTime(value?: number | null): string {

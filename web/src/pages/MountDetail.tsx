@@ -102,6 +102,9 @@ export default function MountDetailPage() {
         <p>
           <strong>巡检间隔</strong>：{mount.schedule?.intervalMinutes ?? 1440} 分钟
         </p>
+        <p>
+          <strong>跨机修复</strong>：{mount.repair_allowed ? '允许（作为修复目标）' : '未开启'}
+        </p>
       </div>
 
       <h2>巡检</h2>
