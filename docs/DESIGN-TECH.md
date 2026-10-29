@@ -1,6 +1,6 @@
 # Observer 技术方案（v0.1）
 
-> 版本：v0.2　日期：2026-10-29　性质：技术方案草案
+> 版本：v0.3　日期：2026-10-29　性质：技术方案草案
 >
 > 上游：[需求整理](REQUIREMENTS.md)（v0.3）、[路径与身份模型](DESIGN-PATH-MODEL.md)（v0.2）。
 > 本文回答"怎么实现"，不改变需求边界。
@@ -177,6 +177,7 @@ agent/
 │  ├─ hash/                  # SHA-256 流式（1MiB buffer pool）
 │  ├─ ratelimit/             # credit bucket（双闸，文件原子）
 │  ├─ hubclient/             # HTTP、重试、退避、keepalive
+│  ├─ state/                 # 本地状态缓存（bbolt，跳过判定用）
 │  ├─ spool/                 # JSONL 离线队列
 │  ├─ scan/                  # 任务执行器（流水线编排）
 │  └─ repair/                # 接收流、校验、quarantine、原子替换
@@ -260,6 +261,7 @@ walker(流式, 有界 channel 4096)
 
 ### 5.7 稳定性与离线
 
+- 本地状态缓存（bbolt）：记录每个 mount 下 `path_key → {size, mtime_ns, hash, hashed_at}`，**仅用于跳过判定**；缓存缺失或规则变化时退化为一律重算，hub 仍是唯一真相源。
 - spool：JSONL append + fsync；按 `(job_id, seq)` 去重，重启后重放。
 - hub 不可达：指数退避（1s 起、上限 5min），期间继续本地扫描但只写 spool。
 - 崩溃重启：进行中的 job 因租约过期由 hub 重派；已完成批次幂等吸收。
@@ -385,7 +387,7 @@ hub 记录 `min_agent_version`；低于则返回 `426`，agent 提示升级但�
 - 注册 token 一次性、24h 过期；长期 token 32B 随机，库内只存 SHA-256。
 - 路径穿越：mount 白名单 + `filepath.Clean` + 落点必须在 mount 内 + 拒绝符号链接越界。
 - 修复：默认关闭；需 `repair_allowed`、目标在 mount 内、源端独立重算哈希、quarantine、审计。
-- Web：单用户密码（argon2id）+ HttpOnly 会话 cookie + CSRF 防护 + 登录限速。
+- Web：单用户密码（`node:crypto` scrypt，零原生依赖）+ HttpOnly 会话 cookie + CSRF 防护 + 登录限速。
 - 传输：默认 HTTPS；TLS 由 Caddy/反代或 hub 自签提供。
 - 审计：所有写操作与修复动作落 `audit_log`，含操作者、目标、结果。
 
@@ -427,3 +429,4 @@ hub 记录 `min_agent_version`；低于则返回 `426`，agent 提示升级但�
 | --- | --- | --- |
 | v0.1 | 2026-10-29 | 初稿：Go+Wails 双形态、双限速（文件原子）、include/exclude、hub 协议与数据模型、里程碑 |
 | v0.2 | 2026-10-29 | 同步需求 v0.4：`machine_id` 改为 agent 配置声明、hub 校验唯一性；J 组全部定稿 |
+| v0.3 | 2026-10-29 | 补充 agent 本地状态缓存（bbolt，用于跳过判定）；口令哈希改用 `node:crypto` scrypt（零原生依赖） |
