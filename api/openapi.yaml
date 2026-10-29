@@ -1,0 +1,211 @@
+openapi: 3.1.0
+info:
+  title: Observer Hub API
+  version: 0.1.0
+  description: |
+    中心服对外接口。M1 阶段包含：健康检查、agent 注册、心跳、Web 登录。
+    错误统一返回 application/problem+json。
+servers:
+  - url: http://127.0.0.1:8787
+    description: 本地开发
+
+paths:
+  /healthz:
+    get:
+      operationId: health
+      summary: 健康检查
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status, time]
+                properties:
+                  status: { type: string, const: ok }
+                  time: { type: integer, description: epoch 毫秒 }
+
+  /api/v1/enroll:
+    post:
+      operationId: enrollAgent
+      summary: agent 注册（一次性 token）
+      security:
+        - enrollToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/EnrollRequest' }
+      responses:
+        '201':
+          description: 注册成功
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/EnrollResponse' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+
+  /api/v1/agent/heartbeat:
+    post:
+      operationId: agentHeartbeat
+      summary: agent 心跳（续租/取任务/清单版本）
+      security:
+        - agentToken: []
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                agent_version: { type: string }
+      responses:
+        '200':
+          description: 心跳结果
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/HeartbeatResponse' }
+        '401': { $ref: '#/components/responses/Problem' }
+
+  /api/v1/auth/login:
+    post:
+      operationId: login
+      summary: Web 登录
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [password]
+              properties:
+                password: { type: string }
+      responses:
+        '200':
+          description: 登录成功（设置 observer_session cookie）
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, expires_at]
+                properties:
+                  ok: { type: boolean }
+                  expires_at: { type: integer }
+        '401': { $ref: '#/components/responses/Problem' }
+        '429': { $ref: '#/components/responses/Problem' }
+
+components:
+  securitySchemes:
+    enrollToken:
+      type: apiKey
+      in: header
+      name: X-Observer-Enroll-Token
+    agentToken:
+      type: http
+      scheme: bearer
+
+  responses:
+    Problem:
+      description: 错误
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+
+  schemas:
+    Problem:
+      type: object
+      required: [type, title, status]
+      properties:
+        type: { type: string }
+        title: { type: string }
+        status: { type: integer }
+        detail: { type: string }
+        retryable: { type: boolean }
+
+    Mount:
+      type: object
+      required: [mount_id, physical_path, rules_hash]
+      properties:
+        mount_id:
+          type: string
+          pattern: '^[a-z0-9][a-z0-9_-]{0,31}$'
+        label: { type: string }
+        physical_path: { type: string }
+        sentinel: { type: [string, 'null'] }
+        fs_kind:
+          type: string
+          enum: [local, network, removable, fuse]
+          default: local
+        case_sensitive:
+          type: string
+          enum: [auto, 'true', 'false']
+          default: auto
+        unicode:
+          type: string
+          enum: [auto, nfc, nfd]
+          default: auto
+        include:
+          type: array
+          items: { type: string }
+          default: []
+        exclude:
+          type: array
+          items: { type: string }
+          default: []
+        rules_hash: { type: string }
+        limits: { type: object, additionalProperties: true }
+        schedule: { type: object, additionalProperties: true }
+
+    EnrollRequest:
+      type: object
+      required: [machine_id, mounts]
+      properties:
+        machine_id:
+          type: string
+          pattern: '^[a-z0-9][a-z0-9_-]{0,31}$'
+        label: { type: string }
+        hostname: { type: string }
+        platform: { type: string }
+        arch: { type: string }
+        agent_version: { type: string }
+        mounts:
+          type: array
+          minItems: 1
+          items: { $ref: '#/components/schemas/Mount' }
+
+    EnrollResponse:
+      type: object
+      required: [agent_id, token, machine_id, protocol, mounts]
+      properties:
+        agent_id: { type: integer }
+        token: { type: string, description: 长期 agent token，只返回一次 }
+        machine_id: { type: string }
+        protocol: { type: integer }
+        mounts:
+          type: array
+          items:
+            type: object
+            required: [mount_id, manifest_epoch]
+            properties:
+              mount_id: { type: string }
+              manifest_epoch: { type: integer }
+
+    HeartbeatResponse:
+      type: object
+      required: [server_time, job, cancel, mounts]
+      properties:
+        server_time: { type: integer }
+        job:
+          type: ['null', object]
+          description: M1 暂为 null，P2 起返回任务
+        cancel: { type: boolean }
+        mounts:
+          type: array
+          items:
+            type: object
+            required: [mount_id, manifest_epoch]
+            properties:
+              mount_id: { type: string }
+              manifest_epoch: { type: integer }
