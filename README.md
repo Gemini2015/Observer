@@ -4,7 +4,7 @@
 
 Observer 由一个中心服（Node.js Web Server）和若干部署在不同机器上的 agent 组成。agent 定期校验本地文件的哈希，与中心服记录的基线比对；一旦某个文件的哈希和之前不一致，就发出提醒，并可从另一台机器的健康副本恢复。
 
-**状态：M2 进行中（P1 自动调度、P3 多机已完成；通知暂缓；M1 交付见 tag `m1`）**
+**状态：M2 已完成（tag `m2`）：自动调度、多机、桌面客户端；通知暂缓**
 
 M1 已实现：hub（SQLite、注册/心跳、任务与租约、结果入库、异常判定、覆盖率、清单下发、Web 控制台）+ agent（配置与规则、遍历、SHA-256、双闸限速、本地缓存、清单同步、spool 补发）+ 验收脚本。
 
@@ -49,15 +49,30 @@ $env:OBSERVER_ENROLL_TOKEN = '<上一步的 token>'
 .\bin\observer-agent.exe run -config observer-agent.yaml
 ```
 
-可用环境变量：`OBSERVER_PORT`、`OBSERVER_DATA_DIR`、`OBSERVER_ADMIN_PASSWORD`、`OBSERVER_LOG_LEVEL`、`OBSERVER_SCHEDULER_ENABLED`（默认 true；设为 false 关闭自动调度）。生产环境必须显式设置管理员口令。
+可用环境变量：`OBSERVER_PORT`、`OBSERVER_DATA_DIR`、`OBSERVER_ADMIN_PASSWORD`、`OBSERVER_LOG_LEVEL`、`OBSERVER_SCHEDULER_ENABLED`（默认 true）、`OBSERVER_SCHEDULER_INTERVAL_MS`（默认 30000）、`OBSERVER_OFFLINE_AFTER_SECONDS`（默认 90）。生产环境必须显式设置管理员口令。
+
+桌面客户端（Windows 先行；需要 Wails CLI 与 WebView2）：
+
+```powershell
+go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0
+cd agent/desktop
+wails3 build
+.\bin\observer-agent-desktop.exe -config ..\observer-agent.yaml
+```
 
 ## 验收
+
+M1 单机闭环（9 项）：
 
 ```powershell
 pwsh ./scripts/drill.ps1
 ```
 
-脚本会自动构建并启动真实的 hub + agent，逐条断言 M1 的 9 项验收：基线覆盖率、保持 mtime 的字节翻转检测、missing 生命周期、hub 重启恢复、停机期间 spool 补发、sentinel 熔断、缓存丢失后清单恢复等。全部通过时退出码为 0。
+M2 两台 agent / 自动调度 / 离线标记 / 桌面单实例（8 项，内部包含 M1 回归）：
+
+```powershell
+pwsh ./scripts/drill-m2.ps1
+```
 
 ## 暂定命名
 
@@ -73,6 +88,6 @@ pwsh ./scripts/drill.ps1
 
 ## 下一步
 
-1. **M2（进行中）**：P1 自动调度、P3 多机已完成；通知（P2）暂缓；继续 P4 Wails 桌面 GUI、P5 验收；
-2. M3：副本关联、跨机修复与隔离区、审计完善；
-3. M4：NAS 容器化、macOS 签名公证、性能与告警聚合打磨。
+1. **M3**：副本关联、跨机修复（隔离区 + 中转 + 校验）、审计完善；
+2. **M4**：NAS 容器化、macOS 签名公证、性能与告警聚合打磨；
+3. 通知（webhook / IM）暂缓，按需再排期。
