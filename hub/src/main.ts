@@ -1,0 +1,27 @@
+import path from 'node:path';
+import { buildApp } from './app.js';
+import { loadEnv } from './env.js';
+import { openDb } from './db/index.js';
+import { migrate } from './db/migrate.js';
+import { ensureAdminPassword } from './services/admin.js';
+
+const env = loadEnv();
+const dataDir = path.resolve(env.OBSERVER_DATA_DIR);
+const db = openDb(path.join(dataDir, 'observer.db'));
+
+migrate(db);
+ensureAdminPassword(db, env.OBSERVER_ADMIN_PASSWORD);
+
+const app = buildApp({ env, db });
+
+async function shutdown(signal: string): Promise<void> {
+  app.log.info({ signal }, 'shutting down');
+  await app.close();
+  db.close();
+  process.exit(0);
+}
+
+process.on('SIGINT', () => void shutdown('SIGINT'));
+process.on('SIGTERM', () => void shutdown('SIGTERM'));
+
+await app.listen({ host: env.OBSERVER_HOST, port: env.OBSERVER_PORT });
