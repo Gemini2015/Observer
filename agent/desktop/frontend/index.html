@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Observer Agent</title>
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <div class="app">
+      <header>
+        <h1>Observer Agent</h1>
+        <span id="conn" class="badge">连接中</span>
+      </header>
+
+      <section class="cards">
+        <div class="card">
+          <div class="label">机器</div>
+          <div id="machine" class="value">-</div>
+        </div>
+        <div class="card">
+          <div class="label">巡检状态</div>
+          <div id="state" class="value">-</div>
+        </div>
+        <div class="card">
+          <div class="label">hub</div>
+          <div id="hub" class="value small">-</div>
+        </div>
+        <div class="card">
+          <div class="label">最近同步</div>
+          <div id="last-run" class="value small">尚未同步</div>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>最近一轮统计</h2>
+        <div id="stats" class="stats">暂无</div>
+      </section>
+
+      <section class="card">
+        <h2>最近错误</h2>
+        <div id="error" class="error">无</div>
+      </section>
+
+      <footer>
+        <a id="hub-link" href="#" data-wml-openURL>打开 hub Web</a>
+        <span class="muted">关闭窗口会隐藏到托盘，巡检继续</span>
+      </footer>
+    </div>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>

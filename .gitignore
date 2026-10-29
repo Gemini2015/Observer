@@ -32,6 +32,14 @@ agent/observer-agent.exe
 agent/observer-agent-desktop
 agent/observer-agent-desktop.exe
 
+# ---- 桌面客户端（Wails）产物 ----
+agent/desktop/bin/
+agent/desktop/.task/
+agent/desktop/frontend/node_modules/
+agent/desktop/frontend/dist/
+agent/desktop/frontend/bindings/
+agent/desktop/*.syso
+
 # ---- 编辑器 / 系统 ----
 .DS_Store
 Thumbs.db
