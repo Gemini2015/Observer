@@ -69,6 +69,44 @@ export default function OverviewPage() {
         </div>
       </div>
 
+      <h2>告警聚合</h2>
+      <div className="cards">
+        <div className="card">
+          <div className="label">内容不一致</div>
+          <div className="value">{data.issues_by_type.mismatch}</div>
+        </div>
+        <div className="card">
+          <div className="label">文件缺失</div>
+          <div className="value">{data.issues_by_type.missing}</div>
+        </div>
+        <div className="card">
+          <div className="label">不可读</div>
+          <div className="value">{data.issues_by_type.unreadable}</div>
+        </div>
+      </div>
+      <div className="panel">
+        {data.issues_by_machine.length === 0 ? (
+          <div className="muted">没有未关闭的异常</div>
+        ) : (
+          <table>
+            <thead>
+              <tr>
+                <th>机器</th>
+                <th>未关闭异常</th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.issues_by_machine.map((row) => (
+                <tr key={row.machine_id}>
+                  <td>{row.machine_id}</td>
+                  <td>{row.open}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+
       <h2>最近任务</h2>
       <div className="panel">
         {data.recent_jobs.length === 0 ? (

@@ -96,6 +96,8 @@ export interface Overview {
   mounts: { total: number };
   coverage: Coverage;
   issues: { open: number; acked: number };
+  issues_by_type: { mismatch: number; missing: number; unreadable: number };
+  issues_by_machine: Array<{ machine_id: string; open: number }>;
   jobs: { pending: number; running: number };
   recent_jobs: Job[];
 }
