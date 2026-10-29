@@ -22,7 +22,7 @@ Observer（观测者）是一个**多机文件完整性巡检与修复系统**�
 
 - 项目名：Observer（观测者）；仓库 `observer`。
 - 隐喻：一次哈希 = 对文件的一次「观测」；入库的哈希 = 「观测记录」；不一致 = 「偏离」（divergence，暂定术语）。
-- 派生标识符（`observer` / `observer-agent` / `OBSERVER_*`）均为暂定，见 [README](../README.md)。
+- 派生标识符（`observer` / `observer-agent` / `OBSERVER_*`）均为暂定，见 [命名与术语](QUICKSTART.md)。
 
 ## 2. 背景与问题
 
