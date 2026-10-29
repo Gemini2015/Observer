@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { api, formatRatio, formatTime, statusClass, type Machine } from '../api';
+import { api, formatRatio, formatRelative, statusClass, type Machine } from '../api';
 
 export default function MachinesPage() {
   const [machines, setMachines] = useState<Machine[] | null>(null);
@@ -34,8 +34,8 @@ export default function MachinesPage() {
             </span>
           </h2>
           <p className="muted">
-            {machine.hostname ?? '-'} · {machine.platform ?? '-'}/{machine.arch ?? '-'} · 最后心跳{' '}
-            {formatTime(machine.last_seen_at)}
+            {machine.hostname ?? '-'} · {machine.platform ?? '-'}/{machine.arch ?? '-'} · agent{' '}
+            {machine.agent_version ?? '-'} · 最后心跳 {formatRelative(machine.last_seen_at)}
           </p>
           {machine.mounts.length === 0 ? (
             <div className="muted">没有挂载点</div>

@@ -57,6 +57,8 @@ export interface Machine {
   arch: string | null;
   status: string;
   last_seen_at: number | null;
+  agent_version?: string | null;
+  agent_protocol?: number | null;
   mounts: MountRef[];
 }
 
@@ -115,6 +117,15 @@ export interface MountDetail extends MountRef {
 
 export function formatTime(value?: number | null): string {
   if (!value) return '-';
+  return new Date(value).toLocaleString();
+}
+
+export function formatRelative(value?: number | null): string {
+  if (!value) return '-';
+  const diff = Date.now() - value;
+  if (diff < 60_000) return '刚刚';
+  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)} 分钟前`;
+  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)} 小时前`;
   return new Date(value).toLocaleString();
 }
 
