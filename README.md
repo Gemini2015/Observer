@@ -4,14 +4,7 @@
 
 Observer 由**中心服（hub）**和部署在各台机器上的 **agent** 组成。agent 定期校验本地文件哈希，与 hub 保存的基线比对；发现内容不一致、文件缺失或不可读时生成异常，并可从另一台机器的健康副本跨机恢复。
 
-**状态：M4 已完成（tag `m4`）**
-
-| 里程碑 | 交付 | tag |
-| --- | --- | --- |
-| M1 | 单机闭环：扫描/基线/入库/异常/Web 控制台 | `m1` |
-| M2 | 自动调度（窗口/预算）、多机、离线标记、Wails 桌面端 | `m2` |
-| M3 | 副本关联 + 跨机修复（隔离/中转/校验/审计） | `m3` |
-| M4 | NAS 部署产物、Linux 交叉编译、性能基准、告警聚合 | `m4` |
+**状态：M1–M4 已完成（tag `m1`–`m4`）；后续规划见 [docs/ROADMAP.md](docs/ROADMAP.md)。**
 
 ## 能力
 
@@ -39,7 +32,7 @@ Observer 由**中心服（hub）**和部署在各台机器上的 **agent** 组�
 | `web/` | React 19 + Vite | 控制台，构建后由 hub 托管 |
 | `agent/` | Go（纯 Go、CGO=0） | 巡检端；`agent/desktop/` 为 Wails 桌面客户端 |
 | `deploy/` | Dockerfile / compose / systemd | 部署产物 |
-| `scripts/` | PowerShell | M1–M4 验收与性能基准 |
+| `scripts/` | PowerShell | 验收与性能基准脚本 |
 
 ## 目录
 
@@ -49,24 +42,8 @@ web/         Web 控制台源码
 agent/       Go agent（cmd/、internal/、desktop/）
 deploy/      Dockerfile、docker-compose、systemd unit、示例配置
 scripts/     drill*.ps1 验收脚本、bench.ps1 性能基准
-docs/        需求、设计、实施计划、部署与测试文档
+docs/        需求、设计、计划、部署与测试文档
 ```
-
-## 快速体验
-
-前置：Node ≥ 22、pnpm ≥ 11、Go ≥ 1.24（桌面端另需 Wails CLI 与 WebView2）。
-
-```powershell
-pnpm install
-pnpm --filter web build        # 构建控制台到 hub/public
-pnpm --filter hub dev          # http://127.0.0.1:8787
-pnpm --filter hub token:create -- --machine my-pc
-cd agent; go build -o bin/observer-agent.exe ./cmd/observer-agent
-$env:OBSERVER_ENROLL_TOKEN = '<token>'
-.\bin\observer-agent.exe run -config observer-agent.yaml
-```
-
-完整步骤（含桌面端、doctor 自检、环境要求）见 [docs/QUICKSTART.md](docs/QUICKSTART.md)；配置项见 [docs/CONFIG.md](docs/CONFIG.md)。
 
 ## 文档
 
@@ -77,26 +54,7 @@ $env:OBSERVER_ENROLL_TOKEN = '<token>'
 | 设计 | [需求整理](docs/REQUIREMENTS.md) | 定位、需求、边界、概念模型、待讨论问题 |
 | 设计 | [路径与身份模型](docs/DESIGN-PATH-MODEL.md) | 三元组身份、mount 映射、引用串、失败模式 |
 | 设计 | [技术方案](docs/DESIGN-TECH.md) | 架构、技术选型（T1–T20）、协议、数据模型、Agent 专题 |
-| 计划 | [M1](docs/PLAN-M1.md) / [M2](docs/PLAN-M2.md) / [M3](docs/PLAN-M3.md) / [M4](docs/PLAN-M4.md) | 各里程碑范围、设计、验收记录 |
+| 计划 | [里程碑与后续](docs/ROADMAP.md) | M1–M4 完成情况、tag、后续方向 |
+| 计划 | [M1](docs/PLAN-M1.md) / [M2](docs/PLAN-M2.md) / [M3](docs/PLAN-M3.md) / [M4](docs/PLAN-M4.md) | 各里程碑范围、设计与验收记录 |
 | 测试 | [测试与验收](docs/TESTING.md) | 单测、drill M1–M4、性能基准、回归矩阵 |
 | 部署 | [部署与打包](docs/DEPLOY.md) | NAS systemd/Docker、Windows、macOS 签名公证 |
-
-## 验收与测试
-
-```powershell
-pnpm --filter hub test                 # hub 单测
-cd agent; go test ./...                # agent 单测
-pwsh ./scripts/drill.ps1               # M1：9 项
-pwsh ./scripts/drill-m2.ps1            # M2：8 项（内含 M1）
-pwsh ./scripts/drill-m3.ps1            # M3：10 项
-pwsh ./scripts/drill-m4.ps1 -RunRegression   # M4：8 项（内含 M2+M3）
-pwsh ./scripts/bench.ps1               # 性能基准
-```
-
-最近一次结果与阈值说明见 [docs/TESTING.md](docs/TESTING.md)。
-
-## 下一步（M5 / 按需）
-
-1. 块级/事件驱动扫描、通知（webhook / IM）、跨机修复自动化；
-2. Windows NSIS 安装包与 macOS 签名公证（需对应平台/证书，见 [docs/DEPLOY.md](docs/DEPLOY.md)）；
-3. 生产部署与 TLS（Caddy）、备份恢复演练。
