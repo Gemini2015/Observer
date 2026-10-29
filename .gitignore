@@ -21,6 +21,10 @@ token
 .env.*
 !.env.example
 
+# ---- 前端构建产物 ----
+web/dist/
+hub/public/
+
 # ---- Go 构建产物 ----
 agent/bin/
 agent/observer-agent
