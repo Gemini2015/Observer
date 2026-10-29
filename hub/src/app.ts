@@ -1,5 +1,8 @@
+import fs from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import Fastify, { type FastifyInstance } from 'fastify';
 import cookie from '@fastify/cookie';
+import fastifyStatic from '@fastify/static';
 import { ZodError } from 'zod';
 import type { Env } from './env.js';
 import type { Db } from './db/index.js';
@@ -18,6 +21,12 @@ export function buildApp({ env, db, logger = true }: BuildAppOptions): FastifyIn
   });
 
   app.register(cookie);
+
+  const publicDir = fileURLToPath(new URL('../public/', import.meta.url));
+  const hasPublic = fs.existsSync(publicDir);
+  if (hasPublic) {
+    app.register(fastifyStatic, { root: publicDir, prefix: '/' });
+  }
 
   app.setErrorHandler((error, request, reply) => {
     if (error instanceof HttpError) {
@@ -38,9 +47,12 @@ export function buildApp({ env, db, logger = true }: BuildAppOptions): FastifyIn
     return problem(reply, 500, 'internal error');
   });
 
-  app.setNotFoundHandler((request, reply) =>
-    problem(reply, 404, 'not found', `${request.method} ${request.url}`),
-  );
+  app.setNotFoundHandler((request, reply) => {
+    if (hasPublic && request.method === 'GET' && !request.url.startsWith('/api/')) {
+      return reply.sendFile('index.html');
+    }
+    return problem(reply, 404, 'not found', `${request.method} ${request.url}`);
+  });
 
   registerRoutes(app, { env, db });
 
