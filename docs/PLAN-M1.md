@@ -1,6 +1,6 @@
 # Observer M1 实施计划
 
-> 版本：v0.2　日期：2026-10-29　性质：可执行实施计划
+> 版本：v0.3　日期：2026-10-29　性质：可执行实施计划
 >
 > 上游：[需求整理](REQUIREMENTS.md)（v0.4）、[技术方案](DESIGN-TECH.md)（v0.3）、[路径与身份模型](DESIGN-PATH-MODEL.md)（v0.3）。
 > 目标：**单机最小闭环**——一个 hub + 一个 agent（同一台 Windows 机器，localhost），跑通「登记 → 基线 → 巡检 → 发现异常 → 关闭异常」。
@@ -28,6 +28,7 @@
 - 双闸限速（`bytes_per_sec` + `files_per_sec`，credit bucket + 欠账）。
 - 跳过判定（bbolt 本地缓存：size + mtime_ns + 90 天兜底）。
 - 清单同步：缓存缺失或 epoch 不一致时从 hub 流式拉取清单重建，**不触发全量重算**（仅 hub 换库 `db_instance_id` 变化时例外）。
+- 清单全量对账兜底：默认每 7 天拉一次全量清单（`cache_full_resync_days`，0 关闭），防止 epoch 漏记。
 - 批量上报（1000 条 / 2s）、`(job_id, seq)` 幂等、JSONL spool + 指数退避。
 - 三种模式：`baseline` / `incremental` / `full`。
 - CLI：`run` / `scan` / `doctor` / `version`。
@@ -319,6 +320,7 @@ agent:
   label: 开发机
   hub: http://localhost:8787          # M1 仅允许 localhost 明文
   token_file: ./.observer/token
+  cache_full_resync_days: 7           # 全量清单对账周期（天），0 = 关闭
 defaults:
   limits: { bytes_per_sec: 200MiB, files_per_sec: 300, burst_bytes: 12GiB, on_window_end: finish }
 mounts:
@@ -348,6 +350,7 @@ walker(流式, 有界 channel 4096)
 - **限速**：credit bucket，`credit` 按速率补充、上限 `burst_bytes`、可为负；文件开始前 `wait(credit ≥ min(size, burst))`，读完后 `credit -= size`。文件数桶在入口处等待；两桶取较长等待。
 - **跳过**：bbolt 中 `(size, mtime_ns)` 相同且 `hashed_at` 在 90 天内 → `skipped`；否则重算并更新缓存。规则变更只影响范围匹配、**不清缓存**；缓存与 hub 的 `manifest_epoch` 对账，缺失时先拉清单再扫。
 - **清单不过滤到期文件**：90 天规则需要 agent 用本地当前 stat 与清单条目比对；hub 只按 `state=active` 与当前规则范围过滤，否则 agent 无法区分"已验过且未变"与"从未见过"。
+- **对账兜底**：无论 epoch 是否变化，每 `cache_full_resync_days`（默认 7 天）强制拉一次全量清单；成本约 30–60MB/百万文件。
 - **路径保真**：上报 `path_display_b64`（原始字节 base64），`path_key` 为 NFC + 折叠大小写后的匹配键。
 - **租约**：每批结果或 30s keepalive 续租；cancel 在当前文件完成后生效。
 - **spool 格式**：每行 `{"job_id":7,"seq":3,"entries":[...],"closing":false}`，重放按 `(job_id,seq)` 去重。
@@ -413,3 +416,11 @@ walker(流式, 有界 channel 4096)
 - Web 可完成「登录 → 触发巡检 → 看到异常」全流程。
 - README 增加「快速开始（M1）」，`docs/DESIGN-TECH.md` 与实际实现无冲突。
 - `git status` 干净，`git tag m1` 打在收尾提交上。
+
+## 12. 变更记录
+
+| 版本 | 日期 | 变更 |
+| --- | --- | --- |
+| v0.1 | 2026-10-29 | 初稿：范围、P0–P6、数据模型、API、Agent 设计、验收、Git 计划 |
+| v0.2 | 2026-10-29 | 增加路径清单同步（manifest epoch、流式下发）与验收 #9 |
+| v0.3 | 2026-10-29 | 增加清单全量对账兜底周期（默认 7 天） |

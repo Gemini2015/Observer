@@ -1,6 +1,6 @@
 # Observer 技术方案（v0.1）
 
-> 版本：v0.4　日期：2026-10-29　性质：技术方案草案
+> 版本：v0.5　日期：2026-10-29　性质：技术方案草案
 >
 > 上游：[需求整理](REQUIREMENTS.md)（v0.3）、[路径与身份模型](DESIGN-PATH-MODEL.md)（v0.2）。
 > 本文回答"怎么实现"，不改变需求边界。
@@ -205,6 +205,7 @@ agent/
 agent:
   machine_id: nas-01            # 本机声明；hub 注册时校验唯一性
   hub: https://hub.lan:8787
+  cache_full_resync_days: 7     # 全量清单对账周期（天），0 = 关闭
 defaults:
   limits: { bytes_per_sec: 200MiB, files_per_sec: 300 }
 mounts:
@@ -269,6 +270,7 @@ walker(流式, 有界 channel 4096)
 - 清单字段：`path_key`、`size`、`mtime_ns`、`hashed_at`；默认不带内容哈希（跳过判定不需要，可省约 40% 体积），诊断可用 `include_hash=1`。
 - **清单不做"到期过滤"**：是否跳过必须由 agent 用本地当前 stat 与清单条目比对（`size` + `mtime_ns` 相同且 90 天内才跳过）。若 hub 提前按 90 天过滤，agent 就无法区分"已验过且未变"与"从未见过"，只能全量重算或冒险跳过。hub 侧只过滤 `state=active` 且落在当前 include/exclude 范围内的路径。
 - 清单传输：NDJSON + gzip 流式，agent 按 1 万条/事务写入 bbolt，内存有界；百万文件约 30–60MB 压缩后数据。
+- **全量对账兜底**：无论 epoch 是否变化，agent 每 `cache_full_resync_days`（默认 7 天，0 关闭）主动拉一次全量清单，防止 epoch 漏记（响应丢失、手工改库、实现 bug）。成本与一次缓存重建相同。
 - spool：JSONL append + fsync；按 `(job_id, seq)` 去重，重启后重放。有未补发结果时先补发，再拉清单（避免旧清单覆盖新状态）。
 - hub 不可达：指数退避（1s 起、上限 5min），期间继续本地扫描但只写 spool。
 - 崩溃重启：进行中的 job 因租约过期由 hub 重派；已完成批次幂等吸收。
@@ -438,3 +440,4 @@ hub 记录 `min_agent_version`；低于则返回 `426`，agent 提示升级但�
 | v0.2 | 2026-10-29 | 同步需求 v0.4：`machine_id` 改为 agent 配置声明、hub 校验唯一性；J 组全部定稿 |
 | v0.3 | 2026-10-29 | 补充 agent 本地状态缓存（bbolt，用于跳过判定）；口令哈希改用 `node:crypto` scrypt（零原生依赖） |
 | v0.4 | 2026-10-29 | 增加清单同步：`manifest_epoch` + 流式 NDJSON 下发；缓存丢失不再触发全量重算；清单不做到期过滤（由 agent 本地比对）；规则变更不清缓存 |
+| v0.5 | 2026-10-29 | 增加清单全量对账兜底周期 `cache_full_resync_days`（默认 7 天，0 关闭） |
