@@ -347,6 +347,7 @@ walker(流式, 有界 channel 4096)
 
 - **限速**：credit bucket，`credit` 按速率补充、上限 `burst_bytes`、可为负；文件开始前 `wait(credit ≥ min(size, burst))`，读完后 `credit -= size`。文件数桶在入口处等待；两桶取较长等待。
 - **跳过**：bbolt 中 `(size, mtime_ns)` 相同且 `hashed_at` 在 90 天内 → `skipped`；否则重算并更新缓存。规则变更只影响范围匹配、**不清缓存**；缓存与 hub 的 `manifest_epoch` 对账，缺失时先拉清单再扫。
+- **清单不过滤到期文件**：90 天规则需要 agent 用本地当前 stat 与清单条目比对；hub 只按 `state=active` 与当前规则范围过滤，否则 agent 无法区分"已验过且未变"与"从未见过"。
 - **路径保真**：上报 `path_display_b64`（原始字节 base64），`path_key` 为 NFC + 折叠大小写后的匹配键。
 - **租约**：每批结果或 30s keepalive 续租；cancel 在当前文件完成后生效。
 - **spool 格式**：每行 `{"job_id":7,"seq":3,"entries":[...],"closing":false}`，重放按 `(job_id,seq)` 去重。

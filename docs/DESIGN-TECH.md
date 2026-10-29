@@ -267,6 +267,7 @@ walker(流式, 有界 channel 4096)
 - **缓存丢失不再等于全量重算**：缓存缺失（换机、重装、文件损坏）→ 先拉清单重建；只有 `db_instance_id` 变化（hub 换库或从备份恢复）或清单不可用时，才退化为全量重算。
 - **规则变更不清缓存**：include/exclude 只影响范围匹配；已有条目的 `size/mtime/hashed_at` 仍然有效。
 - 清单字段：`path_key`、`size`、`mtime_ns`、`hashed_at`；默认不带内容哈希（跳过判定不需要，可省约 40% 体积），诊断可用 `include_hash=1`。
+- **清单不做"到期过滤"**：是否跳过必须由 agent 用本地当前 stat 与清单条目比对（`size` + `mtime_ns` 相同且 90 天内才跳过）。若 hub 提前按 90 天过滤，agent 就无法区分"已验过且未变"与"从未见过"，只能全量重算或冒险跳过。hub 侧只过滤 `state=active` 且落在当前 include/exclude 范围内的路径。
 - 清单传输：NDJSON + gzip 流式，agent 按 1 万条/事务写入 bbolt，内存有界；百万文件约 30–60MB 压缩后数据。
 - spool：JSONL append + fsync；按 `(job_id, seq)` 去重，重启后重放。有未补发结果时先补发，再拉清单（避免旧清单覆盖新状态）。
 - hub 不可达：指数退避（1s 起、上限 5min），期间继续本地扫描但只写 spool。
@@ -436,4 +437,4 @@ hub 记录 `min_agent_version`；低于则返回 `426`，agent 提示升级但�
 | v0.1 | 2026-10-29 | 初稿：Go+Wails 双形态、双限速（文件原子）、include/exclude、hub 协议与数据模型、里程碑 |
 | v0.2 | 2026-10-29 | 同步需求 v0.4：`machine_id` 改为 agent 配置声明、hub 校验唯一性；J 组全部定稿 |
 | v0.3 | 2026-10-29 | 补充 agent 本地状态缓存（bbolt，用于跳过判定）；口令哈希改用 `node:crypto` scrypt（零原生依赖） |
-| v0.4 | 2026-10-29 | 增加清单同步：`manifest_epoch` + 流式 NDJSON 下发；缓存丢失不再触发全量重算；规则变更不清缓存 |
+| v0.4 | 2026-10-29 | 增加清单同步：`manifest_epoch` + 流式 NDJSON 下发；缓存丢失不再触发全量重算；清单不做到期过滤（由 agent 本地比对）；规则变更不清缓存 |
