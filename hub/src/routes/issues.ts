@@ -2,7 +2,9 @@ import type { FastifyInstance } from 'fastify';
 import type { RouteContext } from './index.js';
 import { HttpError } from '../http/errors.js';
 import { requireSession } from '../http/auth.js';
-import { IdParam } from '../http/schemas.js';
+import { IdParam, RepairRequestSchema } from '../http/schemas.js';
+import { getIssueRepairContext, listReplicas } from '../services/replicas.js';
+import { createRepair, transfersPath } from '../services/repairs.js';
 
 interface IssueListRow {
   id: number;
@@ -57,6 +59,52 @@ export function registerIssueRoutes(app: FastifyInstance, ctx: RouteContext): vo
       mount_id: row.mount_id,
       machine_id: row.machine_id,
     }));
+  });
+
+  app.get('/api/v1/issues/:id', async (request) => {
+    requireSession(ctx.db, request);
+    const issueId = IdParam.parse((request.params as { id: string }).id);
+    const context = getIssueRepairContext(ctx.db, issueId);
+    if (!context) throw new HttpError(404, 'issue not found');
+    return {
+      id: context.issueId,
+      type: context.issueType,
+      status: context.issueStatus,
+      confidence: context.confidence,
+      evidence: context.evidence,
+      path_key: context.targetPathKey,
+      mount_id: context.targetMountId,
+      machine_id: context.targetMachineId,
+      target_state: context.targetState,
+      target_size: context.targetSize,
+      expected_hash: context.expectedHash,
+      observed_hash: context.observedHash,
+      repair_allowed: context.repairAllowed,
+    };
+  });
+
+  app.get('/api/v1/issues/:id/replicas', async (request) => {
+    requireSession(ctx.db, request);
+    const issueId = IdParam.parse((request.params as { id: string }).id);
+    const context = getIssueRepairContext(ctx.db, issueId);
+    if (!context) throw new HttpError(404, 'issue not found');
+    return {
+      issue_id: issueId,
+      expected_hash: context.expectedHash,
+      repair_allowed: context.repairAllowed,
+      source_repairable: context.issueType === 'mismatch' || context.issueType === 'missing',
+      replicas: listReplicas(ctx.db, issueId),
+    };
+  });
+
+  app.post('/api/v1/issues/:id/repair', async (request, reply) => {
+    requireSession(ctx.db, request);
+    const issueId = IdParam.parse((request.params as { id: string }).id);
+    const body = RepairRequestSchema.parse(request.body);
+    const result = createRepair(ctx.db, issueId, body.source_path_id, {
+      transfersDir: transfersPath(ctx.env.OBSERVER_DATA_DIR),
+    });
+    return reply.code(202).send(result);
   });
 
   app.post('/api/v1/issues/:id/ack', async (request) => {

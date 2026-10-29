@@ -7,13 +7,25 @@ import {
   FinishSchema,
   HeartbeatInput,
   IdParam,
+  OffsetQuery,
+  RepairResultSchema,
   ResultBatchSchema,
+  TransferFailSchema,
 } from '../http/schemas.js';
 import { enrollAgent, heartbeatAgent } from '../services/registry.js';
 import { findUsableEnrollToken } from '../services/tokens.js';
 import { dispatchJobForAgent, finishJob, getMount } from '../services/jobs.js';
 import { processBatch } from '../services/ingest.js';
 import { streamManifest } from '../services/manifest.js';
+import {
+  agentRepairTasks,
+  agentTransferTasks,
+  appendTransferChunk,
+  failTransfer,
+  readTransferChunk,
+  reportRepairResult,
+  transfersPath,
+} from '../services/repairs.js';
 
 export function registerAgentRoutes(app: FastifyInstance, ctx: RouteContext): void {
   app.post('/api/v1/enroll', async (request, reply) => {
@@ -59,6 +71,8 @@ export function registerAgentRoutes(app: FastifyInstance, ctx: RouteContext): vo
               lease_until: job.lease_until,
             }
           : null,
+      transfers: agentTransferTasks(ctx.db, agent.machine_pk),
+      repairs: agentRepairTasks(ctx.db, agent.machine_pk),
     };
   });
 
@@ -89,5 +103,58 @@ export function registerAgentRoutes(app: FastifyInstance, ctx: RouteContext): vo
       throw new HttpError(404, 'mount not found');
     }
     return streamManifest(ctx.db, mountPk, reply);
+  });
+
+  app.put('/api/v1/transfers/:id/data', async (request) => {
+    const agent = requireAgent(ctx.db, request);
+    const transferId = IdParam.parse((request.params as { id: string }).id);
+    const offset = OffsetQuery.parse((request.query as { offset?: string }).offset);
+    if (!Buffer.isBuffer(request.body)) {
+      throw new HttpError(422, 'binary body required');
+    }
+    return appendTransferChunk(
+      ctx.db,
+      agent,
+      transferId,
+      offset,
+      request.body,
+      transfersPath(ctx.env.OBSERVER_DATA_DIR),
+    );
+  });
+
+  app.get('/api/v1/transfers/:id/data', async (request, reply) => {
+    const agent = requireAgent(ctx.db, request);
+    const transferId = IdParam.parse((request.params as { id: string }).id);
+    const offset = OffsetQuery.parse((request.query as { offset?: string }).offset);
+    const chunk = readTransferChunk(
+      ctx.db,
+      agent,
+      transferId,
+      offset,
+      transfersPath(ctx.env.OBSERVER_DATA_DIR),
+    );
+    reply.header('x-observer-size', chunk.total);
+    return reply.type('application/octet-stream').send(chunk.data);
+  });
+
+  app.post('/api/v1/transfers/:id/fail', async (request) => {
+    const agent = requireAgent(ctx.db, request);
+    const transferId = IdParam.parse((request.params as { id: string }).id);
+    const body = TransferFailSchema.parse(request.body);
+    failTransfer(ctx.db, agent, transferId, body.reason, transfersPath(ctx.env.OBSERVER_DATA_DIR));
+    return { ok: true };
+  });
+
+  app.post('/api/v1/repairs/:id/result', async (request) => {
+    const agent = requireAgent(ctx.db, request);
+    const repairId = IdParam.parse((request.params as { id: string }).id);
+    const body = RepairResultSchema.parse(request.body);
+    return reportRepairResult(
+      ctx.db,
+      agent,
+      repairId,
+      body,
+      transfersPath(ctx.env.OBSERVER_DATA_DIR),
+    );
   });
 }

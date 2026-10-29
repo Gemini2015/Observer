@@ -2,6 +2,7 @@ import type { Db } from '../db/index.js';
 import { HttpError } from '../http/errors.js';
 import { audit } from './audit.js';
 import { createScanJob, expireLeases, type MountRow } from './jobs.js';
+import { expireRepairs } from './repairs.js';
 
 export const DEFAULT_INTERVAL_MINUTES = 1440;
 export const OFFLINE_AFTER_MS = 90_000;
@@ -15,6 +16,7 @@ export interface ScheduleConfig {
 export interface SchedulerTickResult {
   createdJobs: Array<{ jobId: number; mountId: number }>;
   offlinedMachines: number;
+  expiredRepairs: number;
 }
 
 const DEFAULT_SCHEDULE: ScheduleConfig = {
@@ -148,6 +150,7 @@ export function hasBaseline(db: Db, mountPk: number): boolean {
 export interface SchedulerTickOptions {
   actor?: string;
   offlineAfterMs?: number;
+  transfersDir?: string;
 }
 
 /**
@@ -167,6 +170,10 @@ export function runSchedulerTick(
       "UPDATE machines SET status = 'offline' WHERE status = 'online' AND (last_seen_at IS NULL OR last_seen_at < ?)",
     )
     .run(now - offlineAfterMs).changes;
+
+  const expiredRepairs = options.transfersDir
+    ? expireRepairs(db, options.transfersDir, now)
+    : 0;
 
   const mounts = db
     .prepare("SELECT * FROM mounts WHERE state = 'active' ORDER BY id")
@@ -205,5 +212,5 @@ export function runSchedulerTick(
     }, now);
   }
 
-  return { createdJobs, offlinedMachines };
+  return { createdJobs, offlinedMachines, expiredRepairs };
 }

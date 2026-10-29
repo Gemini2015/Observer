@@ -21,6 +21,9 @@ export function buildApp({ env, db, logger = true }: BuildAppOptions): FastifyIn
   });
 
   app.register(cookie);
+  app.addContentTypeParser('application/octet-stream', { parseAs: 'buffer' }, (_request, body, done) => {
+    done(null, body);
+  });
 
   const publicDir = fileURLToPath(new URL('../public/', import.meta.url));
   const hasPublic = fs.existsSync(publicDir);

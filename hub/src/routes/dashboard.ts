@@ -142,6 +142,34 @@ export function registerDashboardRoutes(app: FastifyInstance, ctx: RouteContext)
     });
   });
 
+  app.get('/api/v1/audit', async (request) => {
+    requireSession(ctx.db, request);
+    const query = request.query as { limit?: string; action?: string };
+    const limit = Math.min(500, Math.max(1, Number(query.limit ?? 100) || 100));
+    const rows = (
+      query.action
+        ? ctx.db
+            .prepare('SELECT * FROM audit_log WHERE action LIKE ? ORDER BY id DESC LIMIT ?')
+            .all(`${query.action}%`, limit)
+        : ctx.db.prepare('SELECT * FROM audit_log ORDER BY id DESC LIMIT ?').all(limit)
+    ) as Array<{
+      id: number;
+      actor: string;
+      action: string;
+      target: string | null;
+      detail_json: string | null;
+      at: number;
+    }>;
+    return rows.map((row) => ({
+      id: row.id,
+      actor: row.actor,
+      action: row.action,
+      target: row.target,
+      detail: row.detail_json ? (JSON.parse(row.detail_json) as unknown) : null,
+      at: row.at,
+    }));
+  });
+
   app.get('/api/v1/jobs', async (request) => {
     requireSession(ctx.db, request);
     const query = request.query as { limit?: string; status?: string; mount_id?: string };

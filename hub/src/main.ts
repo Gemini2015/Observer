@@ -20,6 +20,7 @@ if (env.OBSERVER_SCHEDULER_ENABLED) {
     try {
       runSchedulerTick(db, Date.now(), {
         offlineAfterMs: env.OBSERVER_OFFLINE_AFTER_SECONDS * 1000,
+        transfersDir: path.join(env.OBSERVER_DATA_DIR, 'transfers'),
       });
     } catch (error) {
       app.log.error({ err: error }, 'scheduler tick failed');
