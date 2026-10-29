@@ -441,7 +441,7 @@ walker(流式, 有界 channel 4096)
 - **租约**：每批结果或 30s keepalive 续租；cancel 在当前文件完成后生效。
 - **spool 格式**：每行 `{"job_id":7,"seq":3,"entries":[...],"closing":false}`，重放按 `(job_id,seq)` 去重。
 - **单实例**：`state.db` 的 bbolt 文件锁 + 进程锁，双开直接报错退出。
-- **mountguard**：开始前校验 sentinel 内容含 `mount_id`；单轮缺失比例 > 5% 或 > 1000 时，不发逐文件 missing，改为 mount `suspect` 事件。
+- **mountguard**：开始前校验 sentinel 内容含 `mount_id`；当 mount 文件数 ≥ 100 时单轮缺失比例 > 5%，或缺失绝对数 > 1000，不发逐文件 missing，改为 mount `suspect` 事件（小 mount 不按比例熔断）。
 
 ## 7. Web 最小界面
 

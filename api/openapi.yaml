@@ -1,9 +1,9 @@
 openapi: 3.1.0
 info:
   title: Observer Hub API
-  version: 0.1.0
+  version: 0.2.0
   description: |
-    中心服对外接口。M1 阶段包含：健康检查、agent 注册、心跳、Web 登录。
+    中心服对外接口。M1 包含：健康检查、agent 注册/心跳/结果上报、路径清单、Web 登录与挂载点控制。
     错误统一返回 application/problem+json。
 servers:
   - url: http://127.0.0.1:8787
@@ -50,7 +50,7 @@ paths:
   /api/v1/agent/heartbeat:
     post:
       operationId: agentHeartbeat
-      summary: agent 心跳（续租/取任务/清单版本）
+      summary: agent 心跳（续租 / 取任务 / 清单版本）
       security:
         - agentToken: []
       requestBody:
@@ -68,6 +68,125 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/HeartbeatResponse' }
         '401': { $ref: '#/components/responses/Problem' }
+
+  /api/v1/jobs/{id}/results:
+    post:
+      operationId: submitResults
+      summary: 上报一批扫描结果（按 job+seq 幂等）
+      security:
+        - agentToken: []
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ResultBatch' }
+      responses:
+        '200':
+          description: 已接收 / 重复批次
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [accepted, duplicate, manifest_epoch]
+                properties:
+                  accepted: { type: integer }
+                  duplicate: { type: boolean }
+                  manifest_epoch: { type: integer }
+        '401': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+
+  /api/v1/jobs/{id}/finish:
+    post:
+      operationId: finishJob
+      summary: 完成任务（触发 missing 判定与覆盖率更新）
+      security:
+        - agentToken: []
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/FinishRequest' }
+      responses:
+        '200':
+          description: 完成
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FinishResponse' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+
+  /api/v1/mounts/{id}/manifest:
+    get:
+      operationId: getManifest
+      summary: 流式下发路径清单（NDJSON + gzip）
+      security:
+        - agentToken: []
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        '200':
+          description: 每行一个 JSON：k=path_key, s=size, m=mtime_ns, h=last_hashed_at
+          content:
+            application/x-ndjson: {}
+        '401': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+
+  /api/v1/mounts:
+    get:
+      operationId: listMounts
+      summary: 挂载点列表（含覆盖率）
+      security:
+        - sessionCookie: []
+      responses:
+        '200':
+          description: 列表
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/MountView' }
+        '401': { $ref: '#/components/responses/Problem' }
+
+  /api/v1/mounts/{id}/scan:
+    post:
+      operationId: triggerScan
+      summary: 手动触发巡检
+      security:
+        - sessionCookie: []
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                mode:
+                  type: string
+                  enum: [baseline, incremental, full]
+                  default: incremental
+      responses:
+        '202':
+          description: 任务已创建
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [job_id, mode]
+                properties:
+                  job_id: { type: integer }
+                  mode: { type: string }
+        '401': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
 
   /api/v1/auth/login:
     post:
@@ -105,6 +224,10 @@ components:
     agentToken:
       type: http
       scheme: bearer
+    sessionCookie:
+      type: apiKey
+      in: cookie
+      name: observer_session
 
   responses:
     Problem:
@@ -185,12 +308,39 @@ components:
         protocol: { type: integer }
         mounts:
           type: array
-          items:
-            type: object
-            required: [mount_id, manifest_epoch]
-            properties:
-              mount_id: { type: string }
-              manifest_epoch: { type: integer }
+          items: { $ref: '#/components/schemas/MountRef' }
+
+    MountRef:
+      type: object
+      required: [id, mount_id, manifest_epoch]
+      properties:
+        id: { type: integer }
+        mount_id: { type: string }
+        manifest_epoch: { type: integer }
+
+    MountView:
+      type: object
+      required: [id, mount_id, state, coverage]
+      properties:
+        id: { type: integer }
+        mount_id: { type: string }
+        label: { type: [string, 'null'] }
+        machine_id: { type: [string, 'null'] }
+        physical_path: { type: string }
+        state: { type: string }
+        manifest_epoch: { type: integer }
+        rules_hash: { type: string }
+        include: { type: array, items: { type: string } }
+        exclude: { type: array, items: { type: string } }
+        coverage: { $ref: '#/components/schemas/Coverage' }
+
+    Coverage:
+      type: object
+      required: [total, hashed, ratio]
+      properties:
+        total: { type: integer }
+        hashed: { type: integer }
+        ratio: { type: number }
 
     HeartbeatResponse:
       type: object
@@ -198,14 +348,60 @@ components:
       properties:
         server_time: { type: integer }
         job:
-          type: ['null', object]
-          description: M1 暂为 null，P2 起返回任务
+          type: [object, 'null']
+          properties:
+            id: { type: integer }
+            mount_pk: { type: integer }
+            mount_id: { type: string }
+            mode: { type: string, enum: [baseline, incremental, full] }
+            lease_until: { type: integer }
         cancel: { type: boolean }
         mounts:
           type: array
-          items:
-            type: object
-            required: [mount_id, manifest_epoch]
-            properties:
-              mount_id: { type: string }
-              manifest_epoch: { type: integer }
+          items: { $ref: '#/components/schemas/MountRef' }
+
+    ResultEntry:
+      type: object
+      required: [path_key, path_display_b64, size, mtime_ns, status]
+      properties:
+        path_key: { type: string }
+        path_display_b64: { type: string, description: 原始路径字节的 base64 }
+        size: { type: integer, minimum: 0 }
+        mtime_ns: { type: string, description: 纳秒时间戳，十进制字符串 }
+        hash: { type: [string, 'null'], description: sha256 hex }
+        status:
+          type: string
+          enum: [ok, skipped, unreadable, unstable]
+        skip_reason: { type: string }
+
+    ResultBatch:
+      type: object
+      required: [seq, entries]
+      properties:
+        seq: { type: integer, minimum: 0 }
+        entries:
+          type: array
+          maxItems: 1000
+          items: { $ref: '#/components/schemas/ResultEntry' }
+
+    FinishRequest:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [completed, failed, canceled]
+        stats: { type: object, additionalProperties: true }
+        guard:
+          type: object
+          properties:
+            status: { type: string, enum: [ok, unavailable, suspect] }
+            reason: { type: string }
+
+    FinishResponse:
+      type: object
+      required: [ok, job_status, coverage]
+      properties:
+        ok: { type: boolean }
+        job_status: { type: string }
+        coverage: { $ref: '#/components/schemas/Coverage' }

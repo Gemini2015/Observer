@@ -1,41 +1,19 @@
 import type { FastifyInstance } from 'fastify';
-import { z } from 'zod';
 import type { RouteContext } from './index.js';
 import { HttpError } from '../http/errors.js';
 import { requireAgent } from '../http/auth.js';
+import {
+  EnrollInputSchema,
+  FinishSchema,
+  HeartbeatInput,
+  IdParam,
+  ResultBatchSchema,
+} from '../http/schemas.js';
 import { enrollAgent, heartbeatAgent } from '../services/registry.js';
 import { findUsableEnrollToken } from '../services/tokens.js';
-
-const idPattern = /^[a-z0-9][a-z0-9_-]{0,31}$/;
-
-const MountInput = z.object({
-  mount_id: z.string().regex(idPattern),
-  label: z.string().max(200).optional(),
-  physical_path: z.string().min(1).max(4096),
-  sentinel: z.string().min(1).max(255).nullish(),
-  fs_kind: z.enum(['local', 'network', 'removable', 'fuse']).default('local'),
-  case_sensitive: z.enum(['auto', 'true', 'false']).default('auto'),
-  unicode: z.enum(['auto', 'nfc', 'nfd']).default('auto'),
-  include: z.array(z.string().max(1024)).default([]),
-  exclude: z.array(z.string().max(1024)).default([]),
-  rules_hash: z.string().min(1).max(128),
-  limits: z.record(z.unknown()).default({}),
-  schedule: z.record(z.unknown()).default({}),
-});
-
-const EnrollInputSchema = z.object({
-  machine_id: z.string().regex(idPattern),
-  label: z.string().max(200).optional(),
-  hostname: z.string().max(255).optional(),
-  platform: z.string().max(64).optional(),
-  arch: z.string().max(64).optional(),
-  agent_version: z.string().max(64).optional(),
-  mounts: z.array(MountInput).min(1).max(256),
-});
-
-const HeartbeatInput = z.object({
-  agent_version: z.string().max(64).optional(),
-});
+import { dispatchJobForAgent, finishJob, getMount } from '../services/jobs.js';
+import { processBatch } from '../services/ingest.js';
+import { streamManifest } from '../services/manifest.js';
 
 export function registerAgentRoutes(app: FastifyInstance, ctx: RouteContext): void {
   app.post('/api/v1/enroll', async (request, reply) => {
@@ -63,6 +41,53 @@ export function registerAgentRoutes(app: FastifyInstance, ctx: RouteContext): vo
   app.post('/api/v1/agent/heartbeat', async (request) => {
     const agent = requireAgent(ctx.db, request);
     const body = HeartbeatInput.parse(request.body ?? {});
-    return heartbeatAgent(ctx.db, agent, body);
+    const base = heartbeatAgent(ctx.db, agent, body);
+
+    const job = dispatchJobForAgent(ctx.db, agent);
+    const mount = job ? getMount(ctx.db, job.mount_pk) : undefined;
+
+    return {
+      ...base,
+      cancel: job?.cancel_requested === 1,
+      job:
+        job && mount
+          ? {
+              id: job.id,
+              mount_pk: mount.id,
+              mount_id: mount.mount_id,
+              mode: job.mode,
+              lease_until: job.lease_until,
+            }
+          : null,
+    };
+  });
+
+  app.post('/api/v1/jobs/:id/results', async (request) => {
+    const agent = requireAgent(ctx.db, request);
+    const jobId = IdParam.parse((request.params as { id: string }).id);
+    const body = ResultBatchSchema.parse(request.body);
+    return processBatch(ctx.db, {
+      agent,
+      jobId,
+      seq: body.seq,
+      entries: body.entries,
+    });
+  });
+
+  app.post('/api/v1/jobs/:id/finish', async (request) => {
+    const agent = requireAgent(ctx.db, request);
+    const jobId = IdParam.parse((request.params as { id: string }).id);
+    const body = FinishSchema.parse(request.body);
+    return finishJob(ctx.db, agent, jobId, body);
+  });
+
+  app.get('/api/v1/mounts/:id/manifest', async (request, reply) => {
+    const agent = requireAgent(ctx.db, request);
+    const mountPk = IdParam.parse((request.params as { id: string }).id);
+    const mount = getMount(ctx.db, mountPk);
+    if (!mount || mount.machine_pk !== agent.machine_pk) {
+      throw new HttpError(404, 'mount not found');
+    }
+    return streamManifest(ctx.db, mountPk, reply);
   });
 }

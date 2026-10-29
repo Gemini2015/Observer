@@ -26,12 +26,14 @@ describe('POST /api/v1/agent/heartbeat', () => {
       server_time: number;
       job: null;
       cancel: boolean;
-      mounts: Array<{ mount_id: string; manifest_epoch: number }>;
+      mounts: Array<{ id: number; mount_id: string; manifest_epoch: number }>;
     };
     expect(body.job).toBeNull();
     expect(body.cancel).toBe(false);
     expect(body.server_time).toBeGreaterThan(0);
-    expect(body.mounts).toEqual([{ mount_id: 'drill', manifest_epoch: 0 }]);
+    expect(body.mounts).toHaveLength(1);
+    expect(body.mounts[0]).toMatchObject({ mount_id: 'drill', manifest_epoch: 0 });
+    expect(body.mounts[0]?.id).toBeGreaterThan(0);
   });
 
   it('rejects a missing or invalid agent token', async () => {

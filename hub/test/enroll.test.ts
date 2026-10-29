@@ -28,11 +28,13 @@ describe('POST /api/v1/enroll', () => {
       agent_id: number;
       token: string;
       machine_id: string;
-      mounts: Array<{ mount_id: string; manifest_epoch: number }>;
+      mounts: Array<{ id: number; mount_id: string; manifest_epoch: number }>;
     };
     expect(body.token).toBeTruthy();
     expect(body.machine_id).toBe('test-machine');
-    expect(body.mounts).toEqual([{ mount_id: 'drill', manifest_epoch: 0 }]);
+    expect(body.mounts).toHaveLength(1);
+    expect(body.mounts[0]).toMatchObject({ mount_id: 'drill', manifest_epoch: 0 });
+    expect(body.mounts[0]?.id).toBeGreaterThan(0);
 
     const machines = dbRows<{ machine_id: string }>(ctx, 'SELECT machine_id FROM machines');
     expect(machines.map((row) => row.machine_id)).toEqual(['test-machine']);

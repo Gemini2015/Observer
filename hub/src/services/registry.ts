@@ -62,7 +62,7 @@ export interface EnrollResult {
   agentId: number;
   token: string;
   machinePk: number;
-  mounts: Array<{ mount_id: string; manifest_epoch: number }>;
+  mounts: Array<{ id: number; mount_id: string; manifest_epoch: number }>;
 }
 
 function upsertMachine(db: Db, input: EnrollInput, now: number): number {
@@ -138,9 +138,9 @@ export function enrollAgent(
       'INSERT INTO mounts (machine_pk, mount_id, label, physical_path, sentinel, fs_kind, case_sensitive, unicode, include_json, exclude_json, rules_hash, limits_json, schedule_json, state, manifest_epoch, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
     );
 
-    const mounts: Array<{ mount_id: string; manifest_epoch: number }> = [];
+    const mounts: Array<{ id: number; mount_id: string; manifest_epoch: number }> = [];
     for (const mount of input.mounts) {
-      insertMount.run(
+      const mountInfo = insertMount.run(
         machinePk,
         mount.mount_id,
         mount.label ?? null,
@@ -159,7 +159,11 @@ export function enrollAgent(
         now,
         now,
       );
-      mounts.push({ mount_id: mount.mount_id, manifest_epoch: 0 });
+      mounts.push({
+        id: Number(mountInfo.lastInsertRowid),
+        mount_id: mount.mount_id,
+        manifest_epoch: 0,
+      });
     }
 
     db.prepare('UPDATE enroll_tokens SET used_at = ? WHERE id = ?').run(now, enrollTokenPk);
@@ -180,7 +184,7 @@ export function heartbeatAgent(
   server_time: number;
   job: null;
   cancel: boolean;
-  mounts: Array<{ mount_id: string; manifest_epoch: number }>;
+  mounts: Array<{ id: number; mount_id: string; manifest_epoch: number }>;
 } {
   db.prepare('UPDATE agents SET last_seen_at = ?, version = COALESCE(?, version) WHERE id = ?').run(
     now,
@@ -194,9 +198,9 @@ export function heartbeatAgent(
 
   const mounts = db
     .prepare(
-      "SELECT mount_id, manifest_epoch FROM mounts WHERE machine_pk = ? AND state != 'removed' ORDER BY mount_id",
+      "SELECT id, mount_id, manifest_epoch FROM mounts WHERE machine_pk = ? AND state != 'removed' ORDER BY mount_id",
     )
-    .all(agent.machine_pk) as Array<{ mount_id: string; manifest_epoch: number }>;
+    .all(agent.machine_pk) as Array<{ id: number; mount_id: string; manifest_epoch: number }>;
 
   return { server_time: now, job: null, cancel: false, mounts };
 }
