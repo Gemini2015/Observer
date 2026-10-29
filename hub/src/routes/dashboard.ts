@@ -13,6 +13,8 @@ interface MachineRow {
   arch: string | null;
   status: string;
   last_seen_at: number | null;
+  agent_version: string | null;
+  agent_protocol: number | null;
 }
 
 interface MountRow {
@@ -116,7 +118,12 @@ export function registerDashboardRoutes(app: FastifyInstance, ctx: RouteContext)
     requireSession(ctx.db, request);
     const db = ctx.db;
     const machines = db
-      .prepare('SELECT * FROM machines ORDER BY machine_id')
+      .prepare(
+        `SELECT m.*, a.version AS agent_version, a.protocol AS agent_protocol
+         FROM machines m
+         LEFT JOIN agents a ON a.id = (SELECT id FROM agents WHERE machine_pk = m.id ORDER BY id DESC LIMIT 1)
+         ORDER BY m.machine_id`,
+      )
       .all() as MachineRow[];
     const mountStatement = db.prepare(
       "SELECT id, mount_id, label, state, manifest_epoch FROM mounts WHERE machine_pk = ? AND state != 'removed' ORDER BY mount_id",

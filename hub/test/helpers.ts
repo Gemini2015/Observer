@@ -44,7 +44,7 @@ export function makeEnrollToken(db: Db, machineHint = 'test-machine'): string {
   return issueEnrollToken(db, { machineHint }).token;
 }
 
-export function validEnrollPayload(machineId = 'test-machine') {
+export function validEnrollPayload(machineId = 'test-machine', mountId = 'drill') {
   return {
     machine_id: machineId,
     label: '测试机',
@@ -54,9 +54,9 @@ export function validEnrollPayload(machineId = 'test-machine') {
     agent_version: '0.1.0',
     mounts: [
       {
-        mount_id: 'drill',
-        label: '演练目录',
-        physical_path: 'E:\\drill',
+        mount_id: mountId,
+        label: `${mountId} 目录`,
+        physical_path: `E:\\${mountId}`,
         sentinel: '.observer-mount',
         fs_kind: 'local',
         case_sensitive: 'auto',
