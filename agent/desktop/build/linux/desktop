@@ -1,0 +1,13 @@
+[Desktop Entry]
+Version=1.0
+Name=My Product
+Comment=A spike application
+# The Exec line includes %u to pass the URL to the application
+Exec=/usr/local/bin/spike.exe %u
+Terminal=false
+Type=Application
+Icon=spike.exe
+Categories=Utility;
+StartupWMClass=spike.exe
+
+ 

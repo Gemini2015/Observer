@@ -40,6 +40,10 @@ agent/desktop/frontend/dist/
 agent/desktop/frontend/bindings/
 agent/desktop/*.syso
 
+# 全局 build/ 会误伤 Wails 构建配置，显式放行
+!agent/desktop/build/
+!agent/desktop/build/**
+
 # ---- 编辑器 / 系统 ----
 .DS_Store
 Thumbs.db
