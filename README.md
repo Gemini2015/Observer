@@ -4,7 +4,9 @@
 
 Observer 由一个中心服（Node.js Web Server）和若干部署在不同机器上的 agent 组成。agent 定期校验本地文件的哈希，与中心服记录的基线比对；一旦某个文件的哈希和之前不一致，就发出提醒，并可从另一台机器的健康副本恢复。
 
-**状态：M1 实施中（P0 骨架、P1 hub 数据层、P2 任务与入库、P3/P4 agent 核心与全链路已完成）**
+**状态：M1 已完成 —— 9 条验收全部通过（tag `m1`）**
+
+M1 已实现：hub（SQLite、注册/心跳、任务与租约、结果入库、异常判定、覆盖率、清单下发、Web 控制台）+ agent（配置与规则、遍历、SHA-256、双闸限速、本地缓存、清单同步、spool 补发）+ 验收脚本。
 
 ## 文档
 
@@ -13,7 +15,7 @@ Observer 由一个中心服（Node.js Web Server）和若干部署在不同机�
 | [需求整理](docs/REQUIREMENTS.md) | 项目定位、已确认需求、边界、概念模型、待讨论问题、里程碑 |
 | [路径与身份模型](docs/DESIGN-PATH-MODEL.md) | 三元组身份、mount 映射、引用串语法、失败模式、决策点 |
 | [技术方案](docs/DESIGN-TECH.md) | 架构、技术选型（T1–T20）、协议、数据模型、Agent 专题、里程碑 |
-| [M1 实施计划](docs/PLAN-M1.md) | 范围、阶段拆分、数据模型、API 契约、Git 提交计划、验收 |
+| [M1 实施计划](docs/PLAN-M1.md) | 范围、阶段拆分、数据模型、API 契约、验收与收尾记录 |
 
 ## 快速开始（开发）
 
@@ -21,19 +23,40 @@ Observer 由一个中心服（Node.js Web Server）和若干部署在不同机�
 
 ```powershell
 pnpm install
+
 pnpm --filter hub test        # hub 单测
-pnpm --filter hub typecheck   # 源码与测试类型检查
-pnpm --filter hub dev         # 启动 hub：http://127.0.0.1:8787
+pnpm --filter hub typecheck   # hub 类型检查
+pnpm --filter web typecheck   # Web 类型检查
+pnpm --filter web build       # 构建 Web 到 hub/public
+pnpm --filter hub dev         # 启动 hub：http://127.0.0.1:8787（含 Web 控制台）
+
 cd agent; go test ./...       # agent 单测
 ```
 
-生成一次性注册 token（数据默认写入 `hub/data/observer.db`）：
+生成一次性注册 token：
 
 ```powershell
 pnpm --filter hub token:create -- --machine nas-01
 ```
 
+构建并启动 agent：
+
+```powershell
+cd agent
+go build -o bin/observer-agent.exe ./cmd/observer-agent
+$env:OBSERVER_ENROLL_TOKEN = '<上一步的 token>'
+.\bin\observer-agent.exe run -config observer-agent.yaml
+```
+
 可用环境变量：`OBSERVER_PORT`、`OBSERVER_DATA_DIR`、`OBSERVER_ADMIN_PASSWORD`、`OBSERVER_LOG_LEVEL`（生产环境必须显式设置管理员口令）。
+
+## 验收
+
+```powershell
+pwsh ./scripts/drill.ps1
+```
+
+脚本会自动构建并启动真实的 hub + agent，逐条断言 M1 的 9 项验收：基线覆盖率、保持 mtime 的字节翻转检测、missing 生命周期、hub 重启恢复、停机期间 spool 补发、sentinel 熔断、缓存丢失后清单恢复等。全部通过时退出码为 0。
 
 ## 暂定命名
 
@@ -47,8 +70,8 @@ pnpm --filter hub token:create -- --machine nas-01
 
 > 以上均为暂定，需求讨论后统一调整。
 
-## 下一步
+## 下一步（M2+）
 
-1. 继续 P2：任务租约、批次入库、覆盖率、异常判定、清单接口；
-2. P3/P4：agent 配置、遍历、哈希、限速与全链路；P5 最小 Web；P6 以 `scripts/drill.ps1` 的 9 条验收收尾并打 tag `m1`；
-3. M2 交付桌面 GUI（Go + Wails）、调度与通知；M3 做跨机修复。
+1. M2：桌面 GUI（Go + Wails，托盘/自启/单实例）、调度窗口与每日预算、通知渠道（webhook/IM）、多机管理；
+2. M3：副本关联、跨机修复与隔离区、审计完善；
+3. M4：NAS 容器化、macOS 签名公证、性能与告警聚合打磨。

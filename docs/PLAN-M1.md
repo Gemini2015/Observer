@@ -50,6 +50,7 @@
 - 文件重命名 = missing + 新文件（M2 做同内容匹配）。
 - 心跳为 15s 短轮询，长轮询 M2。
 - 每 mount 同时只跑一个任务；单用户。
+- M1 Web 控制台使用原生 `fetch` + 手写 CSS（未引入 TanStack Query / Tailwind），M2 再按技术方案补齐。
 
 ### 1.4 验收（9 条，drill.ps1 逐条断言）
 
@@ -503,7 +504,15 @@ walker(流式, 有界 channel 4096)
 - README 增加「快速开始（M1）」，`docs/DESIGN-TECH.md` 与实际实现无冲突。
 - `git status` 干净，`git tag m1` 打在收尾提交上。
 
-## 12. 变更记录
+## 12. M1 验收结果（2026-10-29）
+
+- `pwsh ./scripts/drill.ps1`：**9/9 通过**（连续两次；覆盖 hub 重启、spool 补发、sentinel 熔断、缓存恢复）。
+- `pnpm --filter hub test`：8 个测试文件、**35 项通过**；`tsc` 类型检查（源码 + 测试）通过。
+- `go test ./...`：agent **11 个包全部通过**；`go vet` 通过。
+- `pnpm --filter web typecheck` / `build` 通过，构建产物由 hub 直接托管。
+- 收尾提交打 tag `m1`。
+
+## 13. 变更记录
 
 | 版本 | 日期 | 变更 |
 | --- | --- | --- |
@@ -511,3 +520,4 @@ walker(流式, 有界 channel 4096)
 | v0.2 | 2026-10-29 | 增加路径清单同步（manifest epoch、流式下发）与验收 #9 |
 | v0.3 | 2026-10-29 | 增加清单全量对账兜底周期（默认 7 天） |
 | v0.4 | 2026-10-29 | 数据库结构评审：`mtime_ns` 改字符串防精度丢失、增量改用 `change_epoch`、补唯一索引 / CHECK 约束 / 索引与保留策略 |
+| v0.5 | 2026-10-29 | M1 收尾：Web 控制台、验收脚本 `drill.ps1`、验收结果记录，打 tag `m1` |
