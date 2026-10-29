@@ -66,6 +66,7 @@ export function validEnrollPayload(machineId = 'test-machine', mountId = 'drill'
         rules_hash: 'rules-1',
         limits: { bytes_per_sec: 1024, files_per_sec: 10 },
         schedule: {},
+        repair_allowed: true,
       },
     ],
   };

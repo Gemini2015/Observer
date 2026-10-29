@@ -18,6 +18,7 @@ export const MountInput = z.object({
   rules_hash: z.string().min(1).max(128),
   limits: z.record(z.unknown()).default({}),
   schedule: z.record(z.unknown()).default({}),
+  repair_allowed: z.boolean().default(false),
 });
 
 export const EnrollInputSchema = z.object({
@@ -63,4 +64,22 @@ export const FinishSchema = z.object({
       reason: z.string().max(200).optional(),
     })
     .optional(),
+});
+
+export const OffsetQuery = z.coerce.number().int().min(0).default(0);
+
+export const RepairRequestSchema = z.object({
+  source_path_id: z.number().int().positive(),
+});
+
+export const TransferFailSchema = z.object({
+  reason: z.string().max(500).default('source upload failed'),
+});
+
+export const RepairResultSchema = z.object({
+  success: z.boolean(),
+  error: z.string().max(500).optional(),
+  hash: z.string().regex(sha256Pattern).optional(),
+  size: z.number().int().min(0).optional(),
+  mtime_ns: z.string().regex(/^\d{1,20}$/).optional(),
 });

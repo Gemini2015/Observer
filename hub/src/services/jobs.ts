@@ -36,6 +36,7 @@ export interface MountRow {
   rules_hash: string;
   limits_json: string;
   schedule_json: string;
+  repair_allowed: number;
   state: string;
   manifest_epoch: number;
   created_at: number;

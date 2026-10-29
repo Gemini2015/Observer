@@ -27,6 +27,7 @@ function mountView(
     include: JSON.parse(mount.include_json) as unknown,
     exclude: JSON.parse(mount.exclude_json) as unknown,
     schedule: parseSchedule(mount.schedule_json),
+    repair_allowed: mount.repair_allowed === 1,
     coverage: computeCoverage(db, mount.id, now),
   };
 }

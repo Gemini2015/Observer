@@ -16,6 +16,7 @@ export interface MountEnrollInput {
   rules_hash: string;
   limits: Record<string, unknown>;
   schedule: Record<string, unknown>;
+  repair_allowed: boolean;
 }
 
 export interface EnrollInput {
@@ -135,7 +136,7 @@ export function enrollAgent(
     const agentId = Number(agentInfo.lastInsertRowid);
 
     const insertMount = db.prepare(
-      'INSERT INTO mounts (machine_pk, mount_id, label, physical_path, sentinel, fs_kind, case_sensitive, unicode, include_json, exclude_json, rules_hash, limits_json, schedule_json, state, manifest_epoch, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      'INSERT INTO mounts (machine_pk, mount_id, label, physical_path, sentinel, fs_kind, case_sensitive, unicode, include_json, exclude_json, rules_hash, limits_json, schedule_json, repair_allowed, state, manifest_epoch, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
     );
 
     const mounts: Array<{ id: number; mount_id: string; manifest_epoch: number }> = [];
@@ -154,6 +155,7 @@ export function enrollAgent(
         mount.rules_hash,
         JSON.stringify(mount.limits),
         JSON.stringify(mount.schedule),
+        mount.repair_allowed ? 1 : 0,
         'active',
         0,
         now,
