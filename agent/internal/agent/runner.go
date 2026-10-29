@@ -16,6 +16,7 @@ import (
 	"observer/agent/internal/config"
 	"observer/agent/internal/hubclient"
 	"observer/agent/internal/mountguard"
+	"observer/agent/internal/repair"
 	"observer/agent/internal/scan"
 	"observer/agent/internal/spool"
 	"observer/agent/internal/state"
@@ -109,6 +110,7 @@ func (r *Runner) RunOnce(ctx context.Context) (scan.Stats, error) {
 	if err := r.syncManifests(ctx, beat); err != nil {
 		return scan.Stats{}, fmt.Errorf("manifest sync: %w", err)
 	}
+	r.processRepairs(ctx, beat)
 	if beat.Job == nil {
 		return scan.Stats{}, nil
 	}
@@ -128,6 +130,20 @@ func (r *Runner) RunOnce(ctx context.Context) (scan.Stats, error) {
 		Now:        r.Now,
 	})
 	return stats, err
+}
+
+// processRepairs 处理心跳下发的修复中转/应用任务（每轮最多各一个）。
+func (r *Runner) processRepairs(ctx context.Context, beat *hubclient.HeartbeatResponse) {
+	for _, task := range beat.Transfers {
+		if err := repair.UploadSource(ctx, r.Client, r.token, r.Config, task); err != nil && !errors.Is(err, context.Canceled) {
+			fmt.Fprintf(os.Stderr, "observer-agent: repair upload %d: %v\n", task.TicketID, err)
+		}
+	}
+	for _, task := range beat.Repairs {
+		if err := repair.ApplyTarget(ctx, r.Client, r.token, r.Config, task); err != nil && !errors.Is(err, context.Canceled) {
+			fmt.Fprintf(os.Stderr, "observer-agent: repair apply %d: %v\n", task.RepairID, err)
+		}
+	}
 }
 
 // Run 常驻循环。
@@ -223,6 +239,7 @@ func (r *Runner) enrollRequest() hubclient.EnrollRequest {
 				"window":                 mount.Schedule.Window,
 				"interval_minutes":       mount.Schedule.IntervalMinutes,
 			},
+			RepairAllowed: mount.RepairAllowed != nil && *mount.RepairAllowed,
 		})
 	}
 	return request

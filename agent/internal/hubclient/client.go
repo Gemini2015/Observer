@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -35,6 +36,7 @@ type EnrollMount struct {
 	RulesHash     string         `json:"rules_hash"`
 	Limits        map[string]any `json:"limits"`
 	Schedule      map[string]any `json:"schedule"`
+	RepairAllowed bool           `json:"repair_allowed"`
 }
 
 type EnrollRequest struct {
@@ -74,11 +76,35 @@ type Job struct {
 }
 
 type HeartbeatResponse struct {
-	ServerTime  int64      `json:"server_time"`
-	DBInstance  string     `json:"db_instance"`
-	Job         *Job       `json:"job"`
-	Cancel      bool       `json:"cancel"`
-	Mounts      []MountRef `json:"mounts"`
+	ServerTime  int64        `json:"server_time"`
+	DBInstance  string       `json:"db_instance"`
+	Job         *Job         `json:"job"`
+	Cancel      bool         `json:"cancel"`
+	Mounts      []MountRef   `json:"mounts"`
+	Transfers   []TransferTask `json:"transfers"`
+	Repairs     []RepairTask   `json:"repairs"`
+}
+
+type TransferTask struct {
+	TicketID     int64  `json:"ticket_id"`
+	RepairID     int64  `json:"repair_id"`
+	MountID      string `json:"mount_id"`
+	PathKey      string `json:"path_key"`
+	Size         int64  `json:"size"`
+	ExpectedHash string `json:"expected_hash"`
+	Offset       int64  `json:"offset"`
+	Status       string `json:"status"`
+}
+
+type RepairTask struct {
+	RepairID     int64  `json:"repair_id"`
+	TicketID     int64  `json:"ticket_id"`
+	MountID      string `json:"mount_id"`
+	PathKey      string `json:"path_key"`
+	Size         int64  `json:"size"`
+	ExpectedHash string `json:"expected_hash"`
+	ObservedHash string `json:"observed_hash"`
+	TargetState  string `json:"target_state"`
 }
 
 type Guard struct {
@@ -297,4 +323,85 @@ func asProblem(err error, target **Problem) bool {
 	}
 	*target = problem
 	return true
+}
+
+// TransferChunkResponse 是上传分块后的状态。
+type TransferChunkResponse struct {
+	BytesReceived int64  `json:"bytes_received"`
+	Size          int64  `json:"size"`
+	Status        string `json:"status"`
+	Error         string `json:"error"`
+}
+
+// RepairResultRequest 是目标端修复结果上报。
+type RepairResultRequest struct {
+	Success bool   `json:"success"`
+	Error   string `json:"error,omitempty"`
+	Hash    string `json:"hash,omitempty"`
+	Size    int64  `json:"size,omitempty"`
+	MtimeNS string `json:"mtime_ns,omitempty"`
+}
+
+// UploadTransferChunk 上传修复中转分块（源端）。
+func (c *Client) UploadTransferChunk(ctx context.Context, agentToken string, ticketID, offset int64, data []byte) (*TransferChunkResponse, error) {
+	url := fmt.Sprintf("%s/api/v1/transfers/%d/data?offset=%d", c.baseURL, ticketID, offset)
+	request, err := http.NewRequestWithContext(ctx, http.MethodPut, url, bytes.NewReader(data))
+	if err != nil {
+		return nil, err
+	}
+	request.Header.Set("Content-Type", "application/octet-stream")
+	request.Header.Set("Authorization", "Bearer "+agentToken)
+	request.Header.Set("Observer-Agent-Version", c.agentVersion)
+
+	response, err := c.http.Do(request)
+	if err != nil {
+		return nil, err
+	}
+	defer response.Body.Close()
+	if response.StatusCode >= 400 {
+		return nil, decodeProblem(response)
+	}
+	var result TransferChunkResponse
+	if err := json.NewDecoder(response.Body).Decode(&result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// DownloadTransferChunk 下载修复中转分块（目标端），返回数据与文件总大小。
+func (c *Client) DownloadTransferChunk(ctx context.Context, agentToken string, ticketID, offset int64) ([]byte, int64, error) {
+	url := fmt.Sprintf("%s/api/v1/transfers/%d/data?offset=%d", c.baseURL, ticketID, offset)
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, 0, err
+	}
+	request.Header.Set("Authorization", "Bearer "+agentToken)
+	request.Header.Set("Observer-Agent-Version", c.agentVersion)
+
+	response, err := c.http.Do(request)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer response.Body.Close()
+	if response.StatusCode >= 400 {
+		return nil, 0, decodeProblem(response)
+	}
+	data, err := io.ReadAll(io.LimitReader(response.Body, 4<<20))
+	if err != nil {
+		return nil, 0, err
+	}
+	total, _ := strconv.ParseInt(response.Header.Get("x-observer-size"), 10, 64)
+	return data, total, nil
+}
+
+// FailTransfer 由源端报告上传失败。
+func (c *Client) FailTransfer(ctx context.Context, agentToken string, ticketID int64, reason string) error {
+	path := fmt.Sprintf("/api/v1/transfers/%d/fail", ticketID)
+	return c.doJSON(ctx, http.MethodPost, path, agentToken, nil, map[string]string{"reason": reason}, nil)
+}
+
+// ReportRepair 由目标端上报修复结果。
+func (c *Client) ReportRepair(ctx context.Context, agentToken string, repairID int64, request RepairResultRequest) error {
+	path := fmt.Sprintf("/api/v1/repairs/%d/result", repairID)
+	return c.doJSON(ctx, http.MethodPost, path, agentToken, nil, request, nil)
 }
