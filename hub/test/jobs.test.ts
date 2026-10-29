@@ -321,6 +321,69 @@ describe('scan jobs', () => {
     expect(job.attempt).toBe(3);
   });
 
+  it('lists issues and supports acknowledge', async () => {
+    const { ctx: context, agent, cookie } = await setup();
+    ctx = context;
+
+    const mtime = '1761234567890123456';
+    await scanOnce(context, {
+      agentToken: agent.agentToken,
+      mountId: agent.mountId,
+      cookie,
+      mode: 'baseline',
+      entries: [fileEntry('a.txt', { content: 'hello', mtimeNs: mtime })],
+    });
+    await scanOnce(context, {
+      agentToken: agent.agentToken,
+      mountId: agent.mountId,
+      cookie,
+      mode: 'full',
+      entries: [fileEntry('a.txt', { content: 'HELLO', mtimeNs: mtime })],
+    });
+
+    const list = await context.app.inject({
+      method: 'GET',
+      url: '/api/v1/issues?status=open',
+      headers: { cookie },
+    });
+    expect(list.statusCode).toBe(200);
+    const issues = list.json() as Array<{
+      id: number;
+      type: string;
+      status: string;
+      confidence: string;
+      mount_id: string;
+      machine_id: string;
+      path_key: string;
+      path_display_b64: string;
+    }>;
+    expect(issues).toHaveLength(1);
+    const issue = issues[0]!;
+    expect(issue).toMatchObject({
+      type: 'mismatch',
+      status: 'open',
+      confidence: 'high',
+      mount_id: 'drill',
+      machine_id: 'test-machine',
+      path_key: 'a.txt',
+    });
+    expect(Buffer.from(issue.path_display_b64, 'base64').toString('utf8')).toBe('a.txt');
+
+    const ack = await context.app.inject({
+      method: 'POST',
+      url: `/api/v1/issues/${issue.id}/ack`,
+      headers: { cookie },
+    });
+    expect(ack.statusCode).toBe(200);
+
+    const acked = await context.app.inject({
+      method: 'GET',
+      url: '/api/v1/issues?status=acked',
+      headers: { cookie },
+    });
+    expect((acked.json() as unknown[]).length).toBe(1);
+  });
+
   it('streams the manifest as gzipped NDJSON', async () => {
     const { ctx: context, agent, cookie } = await setup();
     ctx = context;

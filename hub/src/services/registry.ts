@@ -182,6 +182,7 @@ export function heartbeatAgent(
   now: number = Date.now(),
 ): {
   server_time: number;
+  db_instance: string;
   job: null;
   cancel: boolean;
   mounts: Array<{ id: number; mount_id: string; manifest_epoch: number }>;
@@ -196,13 +197,23 @@ export function heartbeatAgent(
     agent.machine_pk,
   );
 
+  const dbInstanceRow = db
+    .prepare("SELECT value FROM settings WHERE key = 'db_instance_id'")
+    .get() as { value: string } | undefined;
+
   const mounts = db
     .prepare(
       "SELECT id, mount_id, manifest_epoch FROM mounts WHERE machine_pk = ? AND state != 'removed' ORDER BY mount_id",
     )
     .all(agent.machine_pk) as Array<{ id: number; mount_id: string; manifest_epoch: number }>;
 
-  return { server_time: now, job: null, cancel: false, mounts };
+  return {
+    server_time: now,
+    db_instance: dbInstanceRow?.value ?? '',
+    job: null,
+    cancel: false,
+    mounts,
+  };
 }
 
 export function getAgentByToken(db: Db, rawToken: string): AgentRow | undefined {
