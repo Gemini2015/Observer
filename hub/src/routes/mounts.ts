@@ -4,6 +4,7 @@ import { HttpError } from '../http/errors.js';
 import { requireSession } from '../http/auth.js';
 import { IdParam, ScanRequest } from '../http/schemas.js';
 import { computeCoverage, createScanJob, getMount, type MountRow } from '../services/jobs.js';
+import { parseSchedule } from '../services/scheduler.js';
 
 function mountView(
   db: RouteContext['db'],
@@ -25,6 +26,7 @@ function mountView(
     rules_hash: mount.rules_hash,
     include: JSON.parse(mount.include_json) as unknown,
     exclude: JSON.parse(mount.exclude_json) as unknown,
+    schedule: parseSchedule(mount.schedule_json),
     coverage: computeCoverage(db, mount.id, now),
   };
 }

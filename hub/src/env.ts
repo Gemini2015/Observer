@@ -8,6 +8,10 @@ const envSchema = z.object({
   OBSERVER_LOG_LEVEL: z
     .enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent'])
     .default('info'),
+  OBSERVER_SCHEDULER_ENABLED: z
+    .enum(['true', 'false'])
+    .default('true')
+    .transform((value) => value === 'true'),
   NODE_ENV: z.string().default('development'),
 });
 

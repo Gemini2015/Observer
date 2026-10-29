@@ -4,6 +4,7 @@ import { loadEnv } from './env.js';
 import { openDb } from './db/index.js';
 import { migrate } from './db/migrate.js';
 import { ensureAdminPassword } from './services/admin.js';
+import { runSchedulerTick } from './services/scheduler.js';
 
 const env = loadEnv();
 const dataDir = path.resolve(env.OBSERVER_DATA_DIR);
@@ -13,6 +14,22 @@ migrate(db);
 ensureAdminPassword(db, env.OBSERVER_ADMIN_PASSWORD);
 
 const app = buildApp({ env, db });
+
+if (env.OBSERVER_SCHEDULER_ENABLED) {
+  const tick = () => {
+    try {
+      runSchedulerTick(db);
+    } catch (error) {
+      app.log.error({ err: error }, 'scheduler tick failed');
+    }
+  };
+  const schedulerTimer = setInterval(tick, 30_000);
+  schedulerTimer.unref();
+  app.addHook('onClose', async () => {
+    clearInterval(schedulerTimer);
+  });
+  tick();
+}
 
 async function shutdown(signal: string): Promise<void> {
   app.log.info({ signal }, 'shutting down');
