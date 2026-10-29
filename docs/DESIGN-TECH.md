@@ -144,12 +144,13 @@ hub/src/
 - 所有批次按 `(job_id, seq)` 幂等，重放不重复入库。
 - 取消：心跳响应携带 `cancel`，agent 在当前文件完成后停止。
 
-### 4.4 调度
+### 4.4 调度（M2 P1 已实现）
 
-- 每 30s tick；按 mount 计算是否到期（默认每日一次，可配间隔）。
-- 只有落在 `window` 内、且当日预算未用完才派发。
-- 同一 mount 同时只有一个活跃 job；同一 agent 全局并发 1。
-- 手动触发（Web/CLI）不受窗口限制，但受 agent 在线状态限制。
+- 配置来自 `mounts.schedule_json`：`{window, budget_minutes_per_day, interval_minutes}`；缺省为全天、不限预算、每 1440 分钟一次。
+- hub 每 30s tick：先回收过期租约、把心跳超时（>90s）的机器置 `offline`，再为满足条件的 mount 创建 `incremental` 任务。
+- 派发条件：mount 为 `active`、时间在窗口内（支持跨午夜）、**已建基线**（至少一条路径记录）、无活跃任务、距上次任务 ≥ interval、当日预算未耗尽（按 `stats.duration_ms` 累计）。
+- 同一 mount 同时只有一个活跃 job（partial unique 索引兜底）；手动触发不受窗口/预算限制。
+- 开关：`OBSERVER_SCHEDULER_ENABLED`（默认 true）。
 
 ### 4.5 存储
 

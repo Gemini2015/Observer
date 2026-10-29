@@ -4,7 +4,7 @@
 
 Observer 由一个中心服（Node.js Web Server）和若干部署在不同机器上的 agent 组成。agent 定期校验本地文件的哈希，与中心服记录的基线比对；一旦某个文件的哈希和之前不一致，就发出提醒，并可从另一台机器的健康副本恢复。
 
-**状态：M1 已完成 —— 9 条验收全部通过（tag `m1`）**
+**状态：M2 进行中（P0 计划、P1 自动调度已完成；M1 交付见 tag `m1`）**
 
 M1 已实现：hub（SQLite、注册/心跳、任务与租约、结果入库、异常判定、覆盖率、清单下发、Web 控制台）+ agent（配置与规则、遍历、SHA-256、双闸限速、本地缓存、清单同步、spool 补发）+ 验收脚本。
 
@@ -16,6 +16,7 @@ M1 已实现：hub（SQLite、注册/心跳、任务与租约、结果入库、�
 | [路径与身份模型](docs/DESIGN-PATH-MODEL.md) | 三元组身份、mount 映射、引用串语法、失败模式、决策点 |
 | [技术方案](docs/DESIGN-TECH.md) | 架构、技术选型（T1–T20）、协议、数据模型、Agent 专题、里程碑 |
 | [M1 实施计划](docs/PLAN-M1.md) | 范围、阶段拆分、数据模型、API 契约、验收与收尾记录 |
+| [M2 实施计划](docs/PLAN-M2.md) | 调度/通知/多机/桌面 GUI 的范围、设计、验收与进度 |
 
 ## 快速开始（开发）
 
@@ -48,7 +49,7 @@ $env:OBSERVER_ENROLL_TOKEN = '<上一步的 token>'
 .\bin\observer-agent.exe run -config observer-agent.yaml
 ```
 
-可用环境变量：`OBSERVER_PORT`、`OBSERVER_DATA_DIR`、`OBSERVER_ADMIN_PASSWORD`、`OBSERVER_LOG_LEVEL`（生产环境必须显式设置管理员口令）。
+可用环境变量：`OBSERVER_PORT`、`OBSERVER_DATA_DIR`、`OBSERVER_ADMIN_PASSWORD`、`OBSERVER_LOG_LEVEL`、`OBSERVER_SCHEDULER_ENABLED`（默认 true；设为 false 关闭自动调度）。生产环境必须显式设置管理员口令。
 
 ## 验收
 
@@ -70,8 +71,8 @@ pwsh ./scripts/drill.ps1
 
 > 以上均为暂定，需求讨论后统一调整。
 
-## 下一步（M2+）
+## 下一步
 
-1. M2：桌面 GUI（Go + Wails，托盘/自启/单实例）、调度窗口与每日预算、通知渠道（webhook/IM）、多机管理；
+1. **M2（进行中）**：P1 自动调度已完成；继续 P2 通知（webhook / ntfy）、P3 多机演练与 Web 展示、P4 Wails 桌面 GUI、P5 验收；
 2. M3：副本关联、跨机修复与隔离区、审计完善；
 3. M4：NAS 容器化、macOS 签名公证、性能与告警聚合打磨。
