@@ -104,6 +104,11 @@ export interface MountDetail extends MountRef {
   rules_hash: string;
   include: string[];
   exclude: string[];
+  schedule?: {
+    window: string;
+    budgetMinutesPerDay: number;
+    intervalMinutes: number;
+  };
   coverage: Coverage;
   last_job: Job | null;
 }

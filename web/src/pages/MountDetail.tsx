@@ -88,6 +88,22 @@ export default function MountDetailPage() {
         </p>
       </div>
 
+      <h2>调度</h2>
+      <div className="panel">
+        <p>
+          <strong>时间窗口</strong>：{mount.schedule?.window ? mount.schedule.window : '全天'}
+        </p>
+        <p>
+          <strong>每日预算</strong>：
+          {mount.schedule && mount.schedule.budgetMinutesPerDay > 0
+            ? `${mount.schedule.budgetMinutesPerDay} 分钟`
+            : '不限'}
+        </p>
+        <p>
+          <strong>巡检间隔</strong>：{mount.schedule?.intervalMinutes ?? 1440} 分钟
+        </p>
+      </div>
+
       <h2>巡检</h2>
       <div className="panel">
         <div className="toolbar">
