@@ -4,7 +4,7 @@
 
 Observer 由一个中心服（Node.js Web Server）和若干部署在不同机器上的 agent 组成。agent 定期校验本地文件的哈希，与中心服记录的基线比对；一旦某个文件的哈希和之前不一致，就发出提醒，并可从另一台机器的健康副本恢复。
 
-**状态：M2 已完成（tag `m2`）：自动调度、多机、桌面客户端；通知暂缓**
+**状态：M3 已完成（tag `m3`）：副本关联 + 跨机修复（隔离/中转/校验）；M1/M2 见 tag `m1`/`m2`**
 
 M1 已实现：hub（SQLite、注册/心跳、任务与租约、结果入库、异常判定、覆盖率、清单下发、Web 控制台）+ agent（配置与规则、遍历、SHA-256、双闸限速、本地缓存、清单同步、spool 补发）+ 验收脚本。
 
@@ -17,6 +17,7 @@ M1 已实现：hub（SQLite、注册/心跳、任务与租约、结果入库、�
 | [技术方案](docs/DESIGN-TECH.md) | 架构、技术选型（T1–T20）、协议、数据模型、Agent 专题、里程碑 |
 | [M1 实施计划](docs/PLAN-M1.md) | 范围、阶段拆分、数据模型、API 契约、验收与收尾记录 |
 | [M2 实施计划](docs/PLAN-M2.md) | 调度/多机/桌面 GUI 的范围与进度（通知暂缓） |
+| [M3 实施计划](docs/PLAN-M3.md) | 副本关联、跨机修复（隔离/中转/校验）、审计与验收 |
 
 ## 快速开始（开发）
 
@@ -49,6 +50,8 @@ $env:OBSERVER_ENROLL_TOKEN = '<上一步的 token>'
 .\bin\observer-agent.exe run -config observer-agent.yaml
 ```
 
+需要从其它机器的健康副本恢复时，在 mount 配置中加 `repair_allowed: true`（默认关闭）；目标端会把坏文件移入 `<mount>/.observer-quarantine/`。
+
 可用环境变量：`OBSERVER_PORT`、`OBSERVER_DATA_DIR`、`OBSERVER_ADMIN_PASSWORD`、`OBSERVER_LOG_LEVEL`、`OBSERVER_SCHEDULER_ENABLED`（默认 true）、`OBSERVER_SCHEDULER_INTERVAL_MS`（默认 30000）、`OBSERVER_OFFLINE_AFTER_SECONDS`（默认 90）。生产环境必须显式设置管理员口令。
 
 桌面客户端（Windows 先行；需要 Wails CLI 与 WebView2）：
@@ -74,6 +77,12 @@ M2 两台 agent / 自动调度 / 离线标记 / 桌面单实例（8 项，内部
 pwsh ./scripts/drill-m2.ps1
 ```
 
+M3 副本关联 + 跨机修复（10 项）：
+
+```powershell
+pwsh ./scripts/drill-m3.ps1
+```
+
 ## 暂定命名
 
 | 用途 | 名称 |
@@ -88,6 +97,5 @@ pwsh ./scripts/drill-m2.ps1
 
 ## 下一步
 
-1. **M3**：副本关联、跨机修复（隔离区 + 中转 + 校验）、审计完善；
-2. **M4**：NAS 容器化、macOS 签名公证、性能与告警聚合打磨；
-3. 通知（webhook / IM）暂缓，按需再排期。
+1. **M4**：NAS 容器化（Docker / systemd）、macOS 签名公证、性能与告警聚合打磨；
+2. 通知（webhook / IM）暂缓，按需再排期。

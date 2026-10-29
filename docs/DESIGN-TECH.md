@@ -1,6 +1,6 @@
 # Observer 技术方案（v0.1）
 
-> 版本：v0.7　日期：2026-10-29　性质：技术方案草案
+> 版本：v0.8　日期：2026-10-29　性质：技术方案草案
 >
 > 上游：[需求整理](REQUIREMENTS.md)（v0.3）、[路径与身份模型](DESIGN-PATH-MODEL.md)（v0.2）。
 > 本文回答"怎么实现"，不改变需求边界。
@@ -281,6 +281,7 @@ walker(流式, 有界 channel 4096)
 - 目标端：接收流 → 临时文件（同目录）→ 边写边算 SHA-256 → 校验期望哈希 → fsync → 坏文件移入 quarantine → 原子 rename。
 - 源端：只读打开，边读边算，与期望哈希比对，不匹配立即中止并告警。
 - 任一步失败：删除临时文件，不动原文件，回报失败原因。
+- M3 实现：mount `repair_allowed` 默认关闭；票据默认 24h；数据经 hub `data/transfers/<ticket>.part` 中转（分块 1MiB，支持 offset 重试）；quarantine 目录 `<mount>/.observer-quarantine/`；heartbeat 下发 `transfers`/`repairs`；目标端替换前校验当前哈希 = 异常观测哈希（missing 则要求不存在）。
 
 ### 5.9 NAS 形态
 
@@ -447,3 +448,4 @@ hub 记录 `min_agent_version`；低于则返回 `426`，agent 提示升级但�
 | v0.5 | 2026-10-29 | 增加清单全量对账兜底周期 `cache_full_resync_days`（默认 7 天，0 关闭） |
 | v0.6 | 2026-10-29 | 数据库结构评审：`mtime_ns` 改字符串防精度丢失、增量改用 `change_epoch`、补唯一索引 / CHECK 约束 / 索引与保留策略 |
 | v0.7 | 2026-10-29 | 通知（webhook / IM / 邮件）移出 M2 暂缓；M2 范围与 H1 结论同步调整 |
+| v0.8 | 2026-10-29 | M3 实现落地：副本判定、修复票据/中转、quarantine、`repair_allowed` 与验收记录 |
