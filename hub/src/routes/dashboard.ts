@@ -88,6 +88,26 @@ export function registerDashboardRoutes(app: FastifyInstance, ctx: RouteContext)
         "SELECT COALESCE(SUM(CASE WHEN status = 'open' THEN 1 ELSE 0 END),0) AS open, COALESCE(SUM(CASE WHEN status = 'acked' THEN 1 ELSE 0 END),0) AS acked FROM issues",
       )
       .get() as { open: number; acked: number };
+    const issuesByType = { mismatch: 0, missing: 0, unreadable: 0 };
+    const issueTypeRows = db
+      .prepare("SELECT type, COUNT(*) AS count FROM issues WHERE status = 'open' GROUP BY type")
+      .all() as Array<{ type: string; count: number }>;
+    for (const row of issueTypeRows) {
+      if (row.type === 'mismatch' || row.type === 'missing' || row.type === 'unreadable') {
+        issuesByType[row.type] = row.count;
+      }
+    }
+    const issuesByMachine = db
+      .prepare(
+        `SELECT mc.machine_id AS machine_id, COUNT(*) AS open
+         FROM issues i
+         JOIN mounts m ON m.id = i.mount_pk
+         JOIN machines mc ON mc.id = m.machine_pk
+         WHERE i.status = 'open'
+         GROUP BY mc.machine_id
+         ORDER BY open DESC, mc.machine_id`,
+      )
+      .all() as Array<{ machine_id: string; open: number }>;
     const jobs = db
       .prepare(
         "SELECT COALESCE(SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END),0) AS pending, COALESCE(SUM(CASE WHEN status = 'running' THEN 1 ELSE 0 END),0) AS running FROM scan_jobs",
@@ -109,6 +129,8 @@ export function registerDashboardRoutes(app: FastifyInstance, ctx: RouteContext)
         ratio: pathCounts.total === 0 ? 1 : pathCounts.hashed / pathCounts.total,
       },
       issues,
+      issues_by_type: issuesByType,
+      issues_by_machine: issuesByMachine,
       jobs,
       recent_jobs: recent.map(jobView),
     };
