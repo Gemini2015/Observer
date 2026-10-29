@@ -1,0 +1,27 @@
+[Unit]
+Description=Observer file integrity agent
+Documentation=https://github.com/observer/observer
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# 建议使用独立系统用户：useradd --system --home /var/lib/observer --shell /usr/sbin/nologin observer
+User=observer
+Group=observer
+ExecStart=/usr/local/bin/observer-agent run -config /etc/observer/agent.yaml
+Restart=on-failure
+RestartSec=5s
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/observer
+CapabilityBoundingSet=
+AmbientCapabilities=
+LimitNOFILE=65536
+# 资源目标：NAS 扫描内存 ≤80MB（可通过 MemoryMax 硬限制，按需启用）
+# MemoryMax=128M
+
+[Install]
+WantedBy=multi-user.target

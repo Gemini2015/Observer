@@ -1,0 +1,28 @@
+# Observer agent 示例配置（NAS / Linux）
+# 安装到 /etc/observer/agent.yaml，状态目录 /var/lib/observer 可写。
+agent:
+  machine_id: nas-01
+  label: NAS
+  hub: https://observer.example.com
+  token_file: /var/lib/observer/token
+
+mounts:
+  - id: photos
+    label: 照片
+    path: /media/photos
+    sentinel: .observer-mount
+    fs_kind: local
+    read_only: true
+    repair_allowed: false
+    include: []
+    exclude:
+      - "**/.observer-mount"
+      - "**/@eaDir/**" # Synology 缩略图目录
+      - "**/.observer-quarantine/**"
+    schedule:
+      window: "01:00-06:00"
+      budget_minutes_per_day: 240
+      interval_minutes: 1440
+    limits:
+      bytes_per_sec: 52428800 # 50 MiB/s
+      files_per_sec: 100

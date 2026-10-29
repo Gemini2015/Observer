@@ -1,0 +1,25 @@
+# Observer agent（NAS / Linux 容器）
+# 构建上下文：仓库根目录；用法：
+#   docker build -f deploy/Dockerfile.agent -t observer-agent .
+#   docker run --rm -v $PWD/deploy/agent.example.yaml:/etc/observer/agent.yaml:ro \
+#     -v /path/to/media:/media:ro -v observer-agent-state:/var/lib/observer \
+#     -e OBSERVER_ENROLL_TOKEN=... observer-agent
+
+# syntax=docker/dockerfile:1
+FROM golang:1.27 AS build
+WORKDIR /src
+
+COPY agent/go.mod agent/go.sum ./
+RUN go mod download
+
+COPY agent/ ./
+ARG TARGETOS=linux
+ARG TARGETARCH=amd64
+RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
+    go build -trimpath -ldflags="-s -w" -o /out/observer-agent ./cmd/observer-agent
+
+FROM gcr.io/distroless/static-debian12:nonroot
+COPY --from=build /out/observer-agent /usr/local/bin/observer-agent
+USER nonroot:nonroot
+ENTRYPOINT ["/usr/local/bin/observer-agent"]
+CMD ["run", "-config", "/etc/observer/agent.yaml"]
