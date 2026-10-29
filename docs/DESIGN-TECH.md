@@ -1,6 +1,6 @@
 # Observer 技术方案（v0.1）
 
-> 版本：v0.3　日期：2026-10-29　性质：技术方案草案
+> 版本：v0.4　日期：2026-10-29　性质：技术方案草案
 >
 > 上游：[需求整理](REQUIREMENTS.md)（v0.3）、[路径与身份模型](DESIGN-PATH-MODEL.md)（v0.2）。
 > 本文回答"怎么实现"，不改变需求边界。
@@ -125,7 +125,8 @@ hub/src/
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
 | POST | `/api/v1/enroll` | 注册 token → 长期 agent token |
-| POST | `/api/v1/agent/heartbeat` | 心跳 + 取任务/取消/配置版本（可长轮询 25s） |
+| POST | `/api/v1/agent/heartbeat` | 心跳 + 取任务/取消/配置版本/清单版本（可长轮询 25s） |
+| GET | `/api/v1/mounts/{id}/manifest` | agent token：流式 NDJSON（gzip）下发路径清单，用于缓存重建 / 增量同步 |
 | POST | `/api/v1/jobs/{id}/results` | 批量结果，`seq` 幂等，≤1000 条/批 |
 | POST | `/api/v1/jobs/{id}/finish` | 完成 / 失败 + 统计 |
 | GET | `/api/v1/jobs/{id}` | 状态与取消检查 |
@@ -261,8 +262,13 @@ walker(流式, 有界 channel 4096)
 
 ### 5.7 稳定性与离线
 
-- 本地状态缓存（bbolt）：记录每个 mount 下 `path_key → {size, mtime_ns, hash, hashed_at}`，**仅用于跳过判定**；缓存缺失或规则变化时退化为一律重算，hub 仍是唯一真相源。
-- spool：JSONL append + fsync；按 `(job_id, seq)` 去重，重启后重放。
+- 本地状态缓存（bbolt）：每个 mount 下 `path_key → {size, mtime_ns, hashed_at}`，仅用于跳过判定。
+- **清单同步（hub 是唯一真相源）**：`mounts.manifest_epoch` 随路径变化递增；心跳返回各 mount 的 epoch，agent 发现本地 epoch 不同时，通过 `GET /api/v1/mounts/{id}/manifest?since=` 流式拉取并更新缓存。批次/完成响应也回传最新 epoch，agent 落库后记录，避免"自己写的变更又触发自己拉取"。
+- **缓存丢失不再等于全量重算**：缓存缺失（换机、重装、文件损坏）→ 先拉清单重建；只有 `db_instance_id` 变化（hub 换库或从备份恢复）或清单不可用时，才退化为全量重算。
+- **规则变更不清缓存**：include/exclude 只影响范围匹配；已有条目的 `size/mtime/hashed_at` 仍然有效。
+- 清单字段：`path_key`、`size`、`mtime_ns`、`hashed_at`；默认不带内容哈希（跳过判定不需要，可省约 40% 体积），诊断可用 `include_hash=1`。
+- 清单传输：NDJSON + gzip 流式，agent 按 1 万条/事务写入 bbolt，内存有界；百万文件约 30–60MB 压缩后数据。
+- spool：JSONL append + fsync；按 `(job_id, seq)` 去重，重启后重放。有未补发结果时先补发，再拉清单（避免旧清单覆盖新状态）。
 - hub 不可达：指数退避（1s 起、上限 5min），期间继续本地扫描但只写 spool。
 - 崩溃重启：进行中的 job 因租约过期由 hub 重派；已完成批次幂等吸收。
 
@@ -315,8 +321,8 @@ hub 记录 `min_agent_version`；低于则返回 `426`，agent 提示升级但�
 | --- | --- | --- |
 | machines | machine_id, label, platform, arch, last_seen_at, status | 一台物理机 |
 | agents | machine_pk, token_hash, version, capabilities, revoked_at | 可多个（同机多命名空间） |
-| mounts | machine_pk, mount_id, label, physical_path, sentinel, fs_kind, flags, include, exclude, rules_hash, limits, schedule, state | 逻辑挂载点 |
-| paths | mount_pk, path_key, path_display, size, mtime_ns, content_hash, last_seen_at, last_hashed_at, last_hash_kind, volume_id, state | 当前状态，`(mount_pk, path_key)` 唯一 |
+| mounts | machine_pk, mount_id, label, physical_path, sentinel, fs_kind, flags, include, exclude, rules_hash, limits, schedule, state, manifest_epoch | 逻辑挂载点 |
+| paths | mount_pk, path_key, path_display, size, mtime_ns, content_hash, last_seen_at, last_hashed_at, last_hash_kind, volume_id, state, updated_at | 当前状态，`(mount_pk, path_key)` 唯一 |
 | observations | path_pk, hash, algo, kind(baseline/scan/repair), observed_at | 仅哈希事件 |
 | issues | path_pk, type(mismatch/missing/unreadable), status, confidence, evidence, first_seen_at, resolved_at | 异常 |
 | scan_jobs | mount_pk, kind, status, lease_until, attempt, stats, timestamps | 任务 |
@@ -324,7 +330,7 @@ hub 记录 `min_agent_version`；低于则返回 `426`，agent 提示升级但�
 | transfer_tickets | repair_pk, expected_hash, size, expires_at | 中转 |
 | repair_jobs | issue_pk, source_path_pk, target_path_pk, status, bytes_done, verify_result | 修复 |
 | audit_log | actor, action, target, detail, at | 审计 |
-| settings | key, value | 全局配置 |
+| settings | key, value（含 `db_instance_id`，首次建库生成） | 全局配置 |
 
 - 保留策略：`observations` 默认 365 天（可按 mount 覆盖）；`audit_log` 永久（体积小）；`scan_batches` 任务完成后 7 天清理。
 - 规模：百万文件 → `paths` 约 200–300MB；每次全量扫描只追加变化的观测。
@@ -430,3 +436,4 @@ hub 记录 `min_agent_version`；低于则返回 `426`，agent 提示升级但�
 | v0.1 | 2026-10-29 | 初稿：Go+Wails 双形态、双限速（文件原子）、include/exclude、hub 协议与数据模型、里程碑 |
 | v0.2 | 2026-10-29 | 同步需求 v0.4：`machine_id` 改为 agent 配置声明、hub 校验唯一性；J 组全部定稿 |
 | v0.3 | 2026-10-29 | 补充 agent 本地状态缓存（bbolt，用于跳过判定）；口令哈希改用 `node:crypto` scrypt（零原生依赖） |
+| v0.4 | 2026-10-29 | 增加清单同步：`manifest_epoch` + 流式 NDJSON 下发；缓存丢失不再触发全量重算；规则变更不清缓存 |

@@ -1,6 +1,6 @@
 # Observer M1 实施计划
 
-> 版本：v0.1　日期：2026-10-29　性质：可执行实施计划
+> 版本：v0.2　日期：2026-10-29　性质：可执行实施计划
 >
 > 上游：[需求整理](REQUIREMENTS.md)（v0.4）、[技术方案](DESIGN-TECH.md)（v0.3）、[路径与身份模型](DESIGN-PATH-MODEL.md)（v0.3）。
 > 目标：**单机最小闭环**——一个 hub + 一个 agent（同一台 Windows 机器，localhost），跑通「登记 → 基线 → 巡检 → 发现异常 → 关闭异常」。
@@ -13,6 +13,7 @@
 - 环境配置与 SQLite 迁移；`/healthz`。
 - 一次性注册 token（CLI 生成）+ agent 长期 token。
 - `enroll` / `heartbeat`（15s 短轮询）/ 任务租约 / 取消标记。
+- 路径清单下发：`manifest_epoch` + 流式 NDJSON（gzip），供 agent 缓存重建与增量同步。
 - 手动触发巡检（Web/API），任务状态机与幂等批次。
 - 结果入库：`paths` 当前状态、`observations`（仅变化时）、覆盖率。
 - 异常：`mismatch` / `missing` / `unreadable`，含置信度与依据；恢复后自动关闭。
@@ -26,6 +27,7 @@
 - SHA-256 流式哈希；文件级原子读取。
 - 双闸限速（`bytes_per_sec` + `files_per_sec`，credit bucket + 欠账）。
 - 跳过判定（bbolt 本地缓存：size + mtime_ns + 90 天兜底）。
+- 清单同步：缓存缺失或 epoch 不一致时从 hub 流式拉取清单重建，**不触发全量重算**（仅 hub 换库 `db_instance_id` 变化时例外）。
 - 批量上报（1000 条 / 2s）、`(job_id, seq)` 幂等、JSONL spool + 指数退避。
 - 三种模式：`baseline` / `incremental` / `full`。
 - CLI：`run` / `scan` / `doctor` / `version`。
@@ -34,7 +36,7 @@
 - 登录、总览、机器与挂载点、挂载点详情（覆盖率 / 触发巡检）、任务列表与进度、异常列表与确认。
 
 **脚本**
-- `scripts/drill.ps1`：一键跑完 8 条验收。
+- `scripts/drill.ps1`：一键跑完 9 条验收。
 - `scripts/dev-up.ps1`：本地起 hub + agent（开发用）。
 
 ### 1.2 不做（M1 Out，留给后续）
@@ -48,7 +50,7 @@
 - 心跳为 15s 短轮询，长轮询 M2。
 - 每 mount 同时只跑一个任务；单用户。
 
-### 1.4 验收（8 条，drill.ps1 逐条断言）
+### 1.4 验收（9 条，drill.ps1 逐条断言）
 
 | # | 验收 | 判定 |
 | --- | --- | --- |
@@ -60,6 +62,7 @@
 | 6 | 扫描中途重启 hub | 任务租约回收、批次不重复入库 |
 | 7 | hub 停机期间 agent 完成扫描 | 结果进 spool，恢复后补发成功 |
 | 8 | sentinel 改名 → 巡检 | mount `unavailable`，不产生成批 missing |
+| 9 | 清空 agent 本地缓存后巡检 | 从 hub 清单恢复，实际哈希文件数 < 5%（不是全量重算） |
 
 ## 2. 仓库骨架与工具链
 
@@ -134,6 +137,7 @@ cd agent; go run ./cmd/observer-agent -config ..\agent.dev.yaml
 - 手动任务：`POST /api/v1/mounts/{id}/scan {mode}`。
 - 心跳返回任务（`lease_until = now + 60s`），批次/心跳续租；租约过期回 `pending`，重试 > 3 判 `failed`。
 - `results` / `finish`：`scan_batches` 幂等；`paths` upsert；哈希变化写 `observations`。
+- 清单接口：`GET /api/v1/mounts/{id}/manifest` 流式 NDJSON（gzip）；`manifest_epoch` 在路径变化时递增；心跳与批次响应回传最新 epoch。
 - 覆盖率、missing 判定、熔断、`issues` 生成与自动关闭、审计。
 - 验收：集成测试用模拟 agent 上报 3 个文件（一致/变化/丢失）→ 断言 DB 与接口。
 
@@ -151,6 +155,7 @@ cd agent; go run ./cmd/observer-agent -config ..\agent.dev.yaml
 ### P4 agent 全链路
 
 - `hubclient`：enroll（token 落盘 0600）、heartbeat、results、finish；重试与退避。
+- `manifest` 同步：任务开始前比对 epoch，必要时流式拉取并写 bbolt（1 万条/事务）；有未补发结果时先补发再拉取。
 - `spool`：JSONL append + fsync；按 `(job_id, seq)` 去重补发。
 - `scan`：编排跑批（1000 条/2s）、`full`/`incremental`/`baseline`、取消检查、进度统计。
 - CLI：`run`（常驻）、`scan --mount <id> --full`、`doctor`（配置/连通性/权限自检）、`version`。
@@ -166,7 +171,7 @@ cd agent; go run ./cmd/observer-agent -config ..\agent.dev.yaml
 
 ### P6 演练与验收
 
-- `drill.ps1` 实现 8 条验收，输出 PASS/FAIL 摘要与退出码。
+- `drill.ps1` 实现 9 条验收，输出 PASS/FAIL 摘要与退出码。
 - 可选性能基线：生成 10 万小文件，记录扫描耗时、吞吐、hub RSS。
 - 更新 README 快速开始；打 tag `m1`。
 
@@ -194,6 +199,7 @@ CREATE TABLE mounts (
   include_json TEXT NOT NULL DEFAULT '[]', exclude_json TEXT NOT NULL DEFAULT '[]',
   rules_hash TEXT NOT NULL, limits_json TEXT NOT NULL DEFAULT '{}',
   schedule_json TEXT NOT NULL DEFAULT '{}', state TEXT NOT NULL DEFAULT 'active',
+  manifest_epoch INTEGER NOT NULL DEFAULT 0,
   created_at INTEGER NOT NULL,
   UNIQUE (machine_pk, mount_id)
 );
@@ -205,6 +211,7 @@ CREATE TABLE paths (
   last_seen_job_pk INTEGER, last_seen_at INTEGER,
   last_hashed_at INTEGER, last_hash_kind TEXT,
   state TEXT NOT NULL DEFAULT 'active',
+  updated_at INTEGER NOT NULL,
   UNIQUE (mount_pk, path_key)
 );
 CREATE INDEX idx_paths_hash ON paths(content_hash);
@@ -254,6 +261,7 @@ CREATE TABLE audit_log (
   target TEXT, detail_json TEXT, at INTEGER NOT NULL
 );
 
+-- key 含 db_instance_id：首次建库生成，用于判断 hub 是否换库/恢复
 CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 ```
 
@@ -262,7 +270,8 @@ CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 | 方法 | 路径 | 鉴权 | 说明 |
 | --- | --- | --- | --- |
 | POST | `/api/v1/enroll` | 注册 token | 返回 agent 长期 token；同机器 `mount_id` 冲突 409 |
-| POST | `/api/v1/agent/heartbeat` | agent token | 返回任务 / 续租 / 取消标记 |
+| POST | `/api/v1/agent/heartbeat` | agent token | 返回任务 / 续租 / 取消标记 / 清单 epoch |
+| GET | `/api/v1/mounts/{id}/manifest` | agent token | 流式 NDJSON（gzip）路径清单；`since` 预留增量 |
 | POST | `/api/v1/jobs/{id}/results` | agent token | 批次幂等（`job_id` + `seq`） |
 | POST | `/api/v1/jobs/{id}/finish` | agent token | 完成/失败 + 统计 |
 | POST | `/api/v1/auth/login` | — | 建立会话 |
@@ -337,7 +346,7 @@ walker(流式, 有界 channel 4096)
 关键实现约定：
 
 - **限速**：credit bucket，`credit` 按速率补充、上限 `burst_bytes`、可为负；文件开始前 `wait(credit ≥ min(size, burst))`，读完后 `credit -= size`。文件数桶在入口处等待；两桶取较长等待。
-- **跳过**：bbolt 中 `(size, mtime_ns)` 相同且 `hashed_at` 在 90 天内 → `skipped`；否则重算并更新缓存。`rules_hash` 变化 → 清空该 mount 缓存。
+- **跳过**：bbolt 中 `(size, mtime_ns)` 相同且 `hashed_at` 在 90 天内 → `skipped`；否则重算并更新缓存。规则变更只影响范围匹配、**不清缓存**；缓存与 hub 的 `manifest_epoch` 对账，缺失时先拉清单再扫。
 - **路径保真**：上报 `path_display_b64`（原始字节 base64），`path_key` 为 NFC + 折叠大小写后的匹配键。
 - **租约**：每批结果或 30s keepalive 续租；cancel 在当前文件完成后生效。
 - **spool 格式**：每行 `{"job_id":7,"seq":3,"entries":[...],"closing":false}`，重放按 `(job_id,seq)` 去重。
@@ -376,9 +385,9 @@ walker(流式, 有界 channel 4096)
 | 3 | `chore(hub): 搭建 Fastify 骨架与测试` |
 | 4 | `chore(agent): 初始化 Go 模块与 CLI 骨架` |
 | 5 | `feat(hub): 增加 SQLite 迁移、会话与注册接口` |
-| 6 | `feat(hub): 增加任务租约、批次入库与异常判定` |
+| 6 | `feat(hub): 增加任务租约、批次入库、清单接口与异常判定` |
 | 7 | `feat(agent): 实现配置校验、规则、遍历与哈希` |
-| 8 | `feat(agent): 实现限速、缓存、spool 与巡检执行` |
+| 8 | `feat(agent): 实现限速、缓存同步、spool 与巡检执行` |
 | 9 | `feat(web): 增加最小控制台` |
 | 10 | `test: 增加演练脚本与验收` |
 | 11 | `docs: M1 收尾与快速开始`，打 tag `m1` |
@@ -393,12 +402,13 @@ walker(流式, 有界 channel 4096)
 | bbolt 锁导致双开失败 | 启动报错 | 明确提示已有实例；退出码非 0 |
 | 端口 8787 被占用 | hub 起不来 | `OBSERVER_PORT` 覆盖 |
 | 大目录内存尖峰 | OOM | `ReadDir(n)` 流式 + 有界 channel |
+| 清单体积过大（百万文件） | agent 拉取慢、内存高 | NDJSON + gzip 流式，1 万条/事务写 bbolt，端到端内存有界 |
 | 演练脚本 mtime 伪造失败 | 验收 #4 不成立 | 使用 .NET 静态方法（FullLanguage 可用）并断言写入成功 |
 
 ## 11. 完成定义（DoD）
 
 - `pnpm -r test`、`go test ./...` 全绿。
-- `scripts/drill.ps1` 退出码 0，8 条验收全 PASS。
+- `scripts/drill.ps1` 退出码 0，9 条验收全 PASS。
 - Web 可完成「登录 → 触发巡检 → 看到异常」全流程。
 - README 增加「快速开始（M1）」，`docs/DESIGN-TECH.md` 与实际实现无冲突。
 - `git status` 干净，`git tag m1` 打在收尾提交上。
