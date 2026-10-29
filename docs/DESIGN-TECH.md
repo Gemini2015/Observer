@@ -300,9 +300,9 @@ walker(流式, 有界 channel 4096)
 
 ### 6.1 约定
 
-- JSON over HTTPS；`Content-Type: application/json`；时间为 RFC3339（UTC）。
+- JSON over HTTPS；`Content-Type: application/json`；时间字段用 epoch 毫秒（UTC，整数）。
 - 请求头 `Observer-Protocol: 1`、`Observer-Agent-Version: x.y.z`。
-- 路径字段同时给 `path_key` 与 `path_display_b64`（保真）。
+- 路径字段同时给 `path_key` 与 `path_display_b64`（保真）；`mtime_ns` 用**十进制字符串**传输（避免 JS 53 位精度丢失）。
 
 ### 6.2 幂等与重试
 

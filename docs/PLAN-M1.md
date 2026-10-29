@@ -391,8 +391,8 @@ CREATE TABLE settings (
 // POST /api/v1/jobs/7/results
 { "seq": 3, "entries": [
   { "path_key": "2024/a.jpg", "path_display_b64": "MjAyNC9hLmpwZw==",
-    "size": 1024, "mtime_ns": 1761…, "hash": "ab…", "status": "ok" },
-  { "path_key": "2024/b.jpg", "size": 2048, "mtime_ns": 1761…, "status": "skipped",
+    "size": 1024, "mtime_ns": "1761234567890123456", "hash": "ab…", "status": "ok" },
+  { "path_key": "2024/b.jpg", "size": 2048, "mtime_ns": "1761234567890123456", "status": "skipped",
     "skip_reason": "unchanged" } ] }
 ```
 
