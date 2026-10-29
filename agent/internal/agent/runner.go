@@ -221,6 +221,7 @@ func (r *Runner) enrollRequest() hubclient.EnrollRequest {
 			Schedule: map[string]any{
 				"budget_minutes_per_day": mount.Schedule.BudgetMinutesPerDay,
 				"window":                 mount.Schedule.Window,
+				"interval_minutes":       mount.Schedule.IntervalMinutes,
 			},
 		})
 	}

@@ -84,10 +84,11 @@ type Limits struct {
 	OnWindowEnd string   `yaml:"on_window_end"`
 }
 
-// Schedule 目前仅校验格式，M2 才真正参与调度。
+// Schedule 控制 hub 的自动调度策略（窗口/预算/间隔）。
 type Schedule struct {
 	BudgetMinutesPerDay int    `yaml:"budget_minutes_per_day"`
 	Window              string `yaml:"window"`
+	IntervalMinutes     int    `yaml:"interval_minutes"`
 }
 
 // Mount 是单个挂载点配置。
@@ -273,6 +274,9 @@ func (c *Config) validate() error {
 
 		if mount.Schedule.Window != "" && !validWindow(mount.Schedule.Window) {
 			return fmt.Errorf("mount %q: schedule.window must be HH:MM-HH:MM", mount.ID)
+		}
+		if mount.Schedule.IntervalMinutes < 0 {
+			return fmt.Errorf("mount %q: schedule.interval_minutes must be >= 0", mount.ID)
 		}
 
 		for _, existing := range paths {
