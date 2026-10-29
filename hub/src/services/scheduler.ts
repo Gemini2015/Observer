@@ -145,22 +145,28 @@ export function hasBaseline(db: Db, mountPk: number): boolean {
   return db.prepare('SELECT 1 FROM paths WHERE mount_pk = ? LIMIT 1').get(mountPk) !== undefined;
 }
 
+export interface SchedulerTickOptions {
+  actor?: string;
+  offlineAfterMs?: number;
+}
+
 /**
  * 一次调度 tick：回收过期租约、标记离线机器、为到期的 mount 创建自动任务。
- * 纯函数（无定时器），便于测试；由 main.ts 每 30 秒调用。
+ * 纯函数（无定时器），便于测试；由 main.ts 按配置间隔调用。
  */
 export function runSchedulerTick(
   db: Db,
   now: number = Date.now(),
-  actor = 'scheduler',
+  options: SchedulerTickOptions = {},
 ): SchedulerTickResult {
+  const offlineAfterMs = options.offlineAfterMs ?? OFFLINE_AFTER_MS;
   expireLeases(db, now);
 
   const offlinedMachines = db
     .prepare(
       "UPDATE machines SET status = 'offline' WHERE status = 'online' AND (last_seen_at IS NULL OR last_seen_at < ?)",
     )
-    .run(now - OFFLINE_AFTER_MS).changes;
+    .run(now - offlineAfterMs).changes;
 
   const mounts = db
     .prepare("SELECT * FROM mounts WHERE state = 'active' ORDER BY id")
@@ -184,7 +190,7 @@ export function runSchedulerTick(
     }
 
     try {
-      const { jobId } = createScanJob(db, mount.id, 'incremental', actor, now);
+      const { jobId } = createScanJob(db, mount.id, 'incremental', options.actor ?? 'scheduler', now);
       createdJobs.push({ jobId, mountId: mount.id });
     } catch (error) {
       // 唯一索引冲突 = 已有活跃任务，下一 tick 再试。

@@ -18,12 +18,14 @@ const app = buildApp({ env, db });
 if (env.OBSERVER_SCHEDULER_ENABLED) {
   const tick = () => {
     try {
-      runSchedulerTick(db);
+      runSchedulerTick(db, Date.now(), {
+        offlineAfterMs: env.OBSERVER_OFFLINE_AFTER_SECONDS * 1000,
+      });
     } catch (error) {
       app.log.error({ err: error }, 'scheduler tick failed');
     }
   };
-  const schedulerTimer = setInterval(tick, 30_000);
+  const schedulerTimer = setInterval(tick, env.OBSERVER_SCHEDULER_INTERVAL_MS);
   schedulerTimer.unref();
   app.addHook('onClose', async () => {
     clearInterval(schedulerTimer);

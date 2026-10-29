@@ -12,6 +12,8 @@ const envSchema = z.object({
     .enum(['true', 'false'])
     .default('true')
     .transform((value) => value === 'true'),
+  OBSERVER_SCHEDULER_INTERVAL_MS: z.coerce.number().int().min(500).default(30_000),
+  OBSERVER_OFFLINE_AFTER_SECONDS: z.coerce.number().int().min(1).default(90),
   NODE_ENV: z.string().default('development'),
 });
 
