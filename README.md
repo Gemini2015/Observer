@@ -4,7 +4,7 @@
 
 Observer 由一个中心服（Node.js Web Server）和若干部署在不同机器上的 agent 组成。agent 定期校验本地文件的哈希，与中心服记录的基线比对；一旦某个文件的哈希和之前不一致，就发出提醒，并可从另一台机器的健康副本恢复。
 
-**状态：M3 已完成（tag `m3`）：副本关联 + 跨机修复（隔离/中转/校验）；M1/M2 见 tag `m1`/`m2`**
+**状态：M4 已完成（tag `m4`）：部署产物、性能基准、告警聚合；M1–M3 见 tag `m1`–`m3`**
 
 M1 已实现：hub（SQLite、注册/心跳、任务与租约、结果入库、异常判定、覆盖率、清单下发、Web 控制台）+ agent（配置与规则、遍历、SHA-256、双闸限速、本地缓存、清单同步、spool 补发）+ 验收脚本。
 
@@ -18,6 +18,8 @@ M1 已实现：hub（SQLite、注册/心跳、任务与租约、结果入库、�
 | [M1 实施计划](docs/PLAN-M1.md) | 范围、阶段拆分、数据模型、API 契约、验收与收尾记录 |
 | [M2 实施计划](docs/PLAN-M2.md) | 调度/多机/桌面 GUI 的范围与进度（通知暂缓） |
 | [M3 实施计划](docs/PLAN-M3.md) | 副本关联、跨机修复（隔离/中转/校验）、审计与验收 |
+| [M4 实施计划](docs/PLAN-M4.md) | 部署、性能、告警聚合、打包与签名；含验收结果 |
+| [部署与打包](docs/DEPLOY.md) | NAS（systemd/Docker）、Windows、macOS 签名公证 |
 
 ## 快速开始（开发）
 
@@ -83,6 +85,20 @@ M3 副本关联 + 跨机修复（10 项）：
 pwsh ./scripts/drill-m3.ps1
 ```
 
+M4 部署/交叉编译/聚合/性能（8 项，`-RunRegression` 会跑 M2+M3 回归）：
+
+```powershell
+pwsh ./scripts/drill-m4.ps1 -RunRegression
+```
+
+性能基准（真实 hub + agent）：
+
+```powershell
+pwsh ./scripts/bench.ps1
+```
+
+部署产物见 [deploy/](deploy/) 与 [docs/DEPLOY.md](docs/DEPLOY.md)。
+
 ## 暂定命名
 
 | 用途 | 名称 |
@@ -95,7 +111,8 @@ pwsh ./scripts/drill-m3.ps1
 
 > 以上均为暂定，需求讨论后统一调整。
 
-## 下一步
+## 下一步（M5 / 按需）
 
-1. **M4**：NAS 容器化（Docker / systemd）、macOS 签名公证、性能与告警聚合打磨；
-2. 通知（webhook / IM）暂缓，按需再排期。
+1. 块级/事件驱动扫描、通知（webhook / IM）、跨机修复自动化；
+2. Windows NSIS 安装包与 macOS 签名公证需在对应平台/证书环境执行（见 [docs/DEPLOY.md](docs/DEPLOY.md)）；
+3. 生产部署与 TLS（Caddy）、备份恢复演练。
