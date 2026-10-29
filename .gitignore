@@ -1,0 +1,36 @@
+# ---- Node / 前端 ----
+node_modules/
+dist/
+build/
+coverage/
+*.tsbuildinfo
+.pnpm-store/
+
+# ---- 运行时数据 ----
+data/
+*.db
+*.db-wal
+*.db-shm
+*.spool
+*.log
+token
+*.token
+
+# ---- 环境与本地配置 ----
+.env
+.env.*
+!.env.example
+
+# ---- Go 构建产物 ----
+agent/bin/
+agent/observer-agent
+agent/observer-agent.exe
+agent/observer-agent-desktop
+agent/observer-agent-desktop.exe
+
+# ---- 编辑器 / 系统 ----
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
