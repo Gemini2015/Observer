@@ -1,6 +1,6 @@
 # Observer M1 实施计划
 
-> 版本：v0.3　日期：2026-10-29　性质：可执行实施计划
+> 版本：v0.4　日期：2026-10-29　性质：可执行实施计划
 >
 > 上游：[需求整理](REQUIREMENTS.md)（v0.4）、[技术方案](DESIGN-TECH.md)（v0.3）、[路径与身份模型](DESIGN-PATH-MODEL.md)（v0.3）。
 > 目标：**单机最小闭环**——一个 hub + 一个 agent（同一台 Windows 机器，localhost），跑通「登记 → 基线 → 巡检 → 发现异常 → 关闭异常」。
@@ -178,93 +178,179 @@ cd agent; go run ./cmd/observer-agent -config ..\agent.dev.yaml
 
 ## 4. 数据模型（SQLite v1）
 
+**约定**
+
+- 时间字段一律 **epoch 毫秒（UTC，INTEGER）**；唯一例外是 `mtime_ns`，用**十进制字符串**存储与传输——Windows FILETIME 纳秒约 1.7×10^18，超过 JS 安全整数 2^53，用 number 会静默丢精度。
+- 写库连接固定开启：`PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000; PRAGMA synchronous=NORMAL;`
+- 变更序列：路径每次变化（新增/更新/状态变更）时，在同一事务内把 `mounts.manifest_epoch` 自增，并把新值写入该行 `paths.change_epoch`；agent 用它对账与做增量。
+- 不硬删业务行：mount 删除置 `state='removed'`，文件消失置 `state='missing'`，历史保留。
+
 ```sql
+CREATE TABLE schema_migrations (
+  version INTEGER PRIMARY KEY,
+  applied_at INTEGER NOT NULL
+);
+
 CREATE TABLE machines (
-  id INTEGER PRIMARY KEY, machine_id TEXT NOT NULL UNIQUE,
-  label TEXT, platform TEXT, arch TEXT,
+  id INTEGER PRIMARY KEY,
+  machine_id TEXT NOT NULL UNIQUE,
+  label TEXT, hostname TEXT, platform TEXT, arch TEXT,
   created_at INTEGER NOT NULL, last_seen_at INTEGER,
-  status TEXT NOT NULL DEFAULT 'online'
+  status TEXT NOT NULL DEFAULT 'online' CHECK (status IN ('online','offline'))
 );
 
 CREATE TABLE agents (
-  id INTEGER PRIMARY KEY, machine_pk INTEGER NOT NULL REFERENCES machines(id),
-  token_hash TEXT NOT NULL UNIQUE, version TEXT,
+  id INTEGER PRIMARY KEY,
+  machine_pk INTEGER NOT NULL REFERENCES machines(id) ON DELETE RESTRICT,
+  token_hash TEXT NOT NULL UNIQUE,
+  version TEXT, protocol INTEGER NOT NULL DEFAULT 1,
+  capabilities_json TEXT,
   created_at INTEGER NOT NULL, last_seen_at INTEGER, revoked_at INTEGER
 );
+CREATE INDEX idx_agents_machine ON agents(machine_pk);
 
 CREATE TABLE mounts (
-  id INTEGER PRIMARY KEY, machine_pk INTEGER NOT NULL REFERENCES machines(id),
+  id INTEGER PRIMARY KEY,
+  machine_pk INTEGER NOT NULL REFERENCES machines(id) ON DELETE RESTRICT,
   mount_id TEXT NOT NULL, label TEXT, physical_path TEXT NOT NULL,
-  sentinel TEXT, fs_kind TEXT NOT NULL DEFAULT 'local',
-  case_sensitive TEXT NOT NULL DEFAULT 'auto', unicode TEXT NOT NULL DEFAULT 'auto',
-  include_json TEXT NOT NULL DEFAULT '[]', exclude_json TEXT NOT NULL DEFAULT '[]',
-  rules_hash TEXT NOT NULL, limits_json TEXT NOT NULL DEFAULT '{}',
-  schedule_json TEXT NOT NULL DEFAULT '{}', state TEXT NOT NULL DEFAULT 'active',
+  sentinel TEXT,
+  fs_kind TEXT NOT NULL DEFAULT 'local'
+    CHECK (fs_kind IN ('local','network','removable','fuse')),
+  case_sensitive TEXT NOT NULL DEFAULT 'auto'
+    CHECK (case_sensitive IN ('auto','true','false')),
+  unicode TEXT NOT NULL DEFAULT 'auto'
+    CHECK (unicode IN ('auto','nfc','nfd')),
+  include_json TEXT NOT NULL DEFAULT '[]',
+  exclude_json TEXT NOT NULL DEFAULT '[]',
+  rules_hash TEXT NOT NULL,
+  limits_json TEXT NOT NULL DEFAULT '{}',
+  schedule_json TEXT NOT NULL DEFAULT '{}',
+  state TEXT NOT NULL DEFAULT 'active'
+    CHECK (state IN ('active','unavailable','suspect','removed')),
   manifest_epoch INTEGER NOT NULL DEFAULT 0,
-  created_at INTEGER NOT NULL,
+  created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,
   UNIQUE (machine_pk, mount_id)
 );
 
 CREATE TABLE paths (
-  id INTEGER PRIMARY KEY, mount_pk INTEGER NOT NULL REFERENCES mounts(id),
-  path_key TEXT NOT NULL, path_display_b64 TEXT NOT NULL,
-  size INTEGER NOT NULL, mtime_ns INTEGER NOT NULL, content_hash TEXT,
-  last_seen_job_pk INTEGER, last_seen_at INTEGER,
-  last_hashed_at INTEGER, last_hash_kind TEXT,
-  state TEXT NOT NULL DEFAULT 'active',
+  id INTEGER PRIMARY KEY,
+  mount_pk INTEGER NOT NULL REFERENCES mounts(id) ON DELETE RESTRICT,
+  path_key TEXT NOT NULL,
+  path_display BLOB NOT NULL,          -- 原始路径字节；wire 上再 base64
+  size INTEGER NOT NULL,
+  mtime_ns TEXT NOT NULL,              -- 十进制字符串，防 JS 精度丢失
+  content_hash TEXT,                   -- sha256 hex
+  volume_id TEXT,
+  last_seen_job_pk INTEGER,
+  last_seen_at INTEGER,
+  last_hashed_at INTEGER,
+  last_hash_kind TEXT CHECK (last_hash_kind IN ('hash','skip')),
+  state TEXT NOT NULL DEFAULT 'active'
+    CHECK (state IN ('active','missing','out_of_scope')),
+  change_epoch INTEGER NOT NULL DEFAULT 0,
   updated_at INTEGER NOT NULL,
   UNIQUE (mount_pk, path_key)
 );
 CREATE INDEX idx_paths_hash ON paths(content_hash);
+CREATE INDEX idx_paths_cover ON paths(mount_pk, state, last_hashed_at);
+CREATE INDEX idx_paths_missing ON paths(mount_pk, last_seen_job_pk);
+CREATE INDEX idx_paths_delta ON paths(mount_pk, change_epoch);
 
 CREATE TABLE observations (
-  id INTEGER PRIMARY KEY, path_pk INTEGER NOT NULL REFERENCES paths(id),
-  hash TEXT NOT NULL, algo TEXT NOT NULL, kind TEXT NOT NULL,
+  id INTEGER PRIMARY KEY,
+  path_pk INTEGER NOT NULL REFERENCES paths(id) ON DELETE CASCADE,
+  hash TEXT NOT NULL,
+  algo TEXT NOT NULL DEFAULT 'sha256',
+  kind TEXT NOT NULL CHECK (kind IN ('baseline','scan','repair')),
   observed_at INTEGER NOT NULL
 );
 CREATE INDEX idx_obs_path ON observations(path_pk, observed_at);
+CREATE INDEX idx_obs_time ON observations(observed_at);
 
 CREATE TABLE scan_jobs (
-  id INTEGER PRIMARY KEY, mount_pk INTEGER NOT NULL REFERENCES mounts(id),
-  mode TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending',
-  lease_until INTEGER, attempt INTEGER NOT NULL DEFAULT 0,
-  started_at INTEGER, finished_at INTEGER, stats_json TEXT,
+  id INTEGER PRIMARY KEY,
+  mount_pk INTEGER NOT NULL REFERENCES mounts(id) ON DELETE RESTRICT,
+  mode TEXT NOT NULL CHECK (mode IN ('baseline','incremental','full')),
+  status TEXT NOT NULL DEFAULT 'pending'
+    CHECK (status IN ('pending','running','completed','failed','canceled','expired')),
+  rules_hash TEXT NOT NULL,            -- 任务创建时的规则快照
+  lease_until INTEGER,
+  attempt INTEGER NOT NULL DEFAULT 0,
+  cancel_requested INTEGER NOT NULL DEFAULT 0,
+  started_at INTEGER, finished_at INTEGER,
+  stats_json TEXT,
   created_at INTEGER NOT NULL
 );
+CREATE INDEX idx_jobs_queue ON scan_jobs(status, created_at);
+CREATE INDEX idx_jobs_lease ON scan_jobs(status, lease_until);
+CREATE UNIQUE INDEX uq_jobs_active ON scan_jobs(mount_pk)
+  WHERE status IN ('pending','running');
 
 CREATE TABLE scan_batches (
-  job_pk INTEGER NOT NULL REFERENCES scan_jobs(id),
-  seq INTEGER NOT NULL, received_at INTEGER NOT NULL,
+  job_pk INTEGER NOT NULL REFERENCES scan_jobs(id) ON DELETE CASCADE,
+  seq INTEGER NOT NULL,
+  received_at INTEGER NOT NULL,
   PRIMARY KEY (job_pk, seq)
 );
 
 CREATE TABLE issues (
-  id INTEGER PRIMARY KEY, path_pk INTEGER NOT NULL REFERENCES paths(id),
-  mount_pk INTEGER NOT NULL, type TEXT NOT NULL,
-  status TEXT NOT NULL DEFAULT 'open', confidence TEXT NOT NULL,
-  evidence_json TEXT, first_seen_at INTEGER NOT NULL,
-  last_seen_at INTEGER NOT NULL, resolved_at INTEGER
+  id INTEGER PRIMARY KEY,
+  path_pk INTEGER NOT NULL REFERENCES paths(id) ON DELETE CASCADE,
+  mount_pk INTEGER NOT NULL REFERENCES mounts(id) ON DELETE RESTRICT,
+  type TEXT NOT NULL CHECK (type IN ('mismatch','missing','unreadable')),
+  status TEXT NOT NULL DEFAULT 'open'
+    CHECK (status IN ('open','acked','ignored','resolved')),
+  confidence TEXT NOT NULL CHECK (confidence IN ('high','medium','low')),
+  evidence_json TEXT,
+  occurrences INTEGER NOT NULL DEFAULT 1,
+  first_seen_at INTEGER NOT NULL,
+  last_seen_at INTEGER NOT NULL,
+  resolved_at INTEGER,
+  UNIQUE (path_pk, type)               -- 一个路径一种异常只有一条生命周期记录
 );
-CREATE INDEX idx_issues_status ON issues(status);
+CREATE INDEX idx_issues_status ON issues(status, last_seen_at);
+CREATE INDEX idx_issues_mount ON issues(mount_pk, status);
 
 CREATE TABLE enroll_tokens (
-  id INTEGER PRIMARY KEY, token_hash TEXT NOT NULL UNIQUE,
-  machine_hint TEXT, expires_at INTEGER NOT NULL, used_at INTEGER,
+  id INTEGER PRIMARY KEY,
+  token_hash TEXT NOT NULL UNIQUE,
+  machine_hint TEXT,
+  expires_at INTEGER NOT NULL, used_at INTEGER,
   created_at INTEGER NOT NULL
 );
 
 CREATE TABLE sessions (
-  id TEXT PRIMARY KEY, created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL
+  id TEXT PRIMARY KEY,
+  created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL
 );
 
 CREATE TABLE audit_log (
-  id INTEGER PRIMARY KEY, actor TEXT, action TEXT NOT NULL,
-  target TEXT, detail_json TEXT, at INTEGER NOT NULL
+  id INTEGER PRIMARY KEY,
+  actor TEXT NOT NULL,                 -- user | agent:<id> | system
+  action TEXT NOT NULL,
+  target TEXT, detail_json TEXT,
+  at INTEGER NOT NULL
 );
+CREATE INDEX idx_audit_time ON audit_log(at);
 
--- key 含 db_instance_id：首次建库生成，用于判断 hub 是否换库/恢复
-CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+CREATE TABLE settings (
+  key TEXT PRIMARY KEY, value TEXT NOT NULL
+);
+-- 初始行：db_instance_id（首次建库生成的 UUID）
 ```
+
+**索引与保留策略**
+
+| 用途 | 索引 / 规则 |
+| --- | --- |
+| 覆盖率统计 | `paths(mount_pk, state, last_hashed_at)` |
+| missing 判定 | `paths(mount_pk, last_seen_job_pk)` |
+| 清单增量 | `paths(mount_pk, change_epoch)` |
+| 跨机副本 | `paths(content_hash)` |
+| 任务队列 / 租约过期 | `scan_jobs(status, created_at)`、`scan_jobs(status, lease_until)` |
+| 每 mount 仅一个活跃任务 | `UNIQUE scan_jobs(mount_pk) WHERE status IN ('pending','running')` |
+| 每路径每类异常仅一条 | `UNIQUE issues(path_pk, type)`（恢复后重置状态，不新开行） |
+| 保留 | `observations` 365 天；`scan_batches` 任务完成后 7 天；`sessions` 过期清理；过期 `enroll_tokens` 7 天；`audit_log` 永久 |
 
 ## 5. API 契约（M1）
 
@@ -424,3 +510,4 @@ walker(流式, 有界 channel 4096)
 | v0.1 | 2026-10-29 | 初稿：范围、P0–P6、数据模型、API、Agent 设计、验收、Git 计划 |
 | v0.2 | 2026-10-29 | 增加路径清单同步（manifest epoch、流式下发）与验收 #9 |
 | v0.3 | 2026-10-29 | 增加清单全量对账兜底周期（默认 7 天） |
+| v0.4 | 2026-10-29 | 数据库结构评审：`mtime_ns` 改字符串防精度丢失、增量改用 `change_epoch`、补唯一索引 / CHECK 约束 / 索引与保留策略 |

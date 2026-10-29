@@ -1,6 +1,6 @@
 # Observer 技术方案（v0.1）
 
-> 版本：v0.5　日期：2026-10-29　性质：技术方案草案
+> 版本：v0.6　日期：2026-10-29　性质：技术方案草案
 >
 > 上游：[需求整理](REQUIREMENTS.md)（v0.3）、[路径与身份模型](DESIGN-PATH-MODEL.md)（v0.2）。
 > 本文回答"怎么实现"，不改变需求边界。
@@ -322,13 +322,13 @@ hub 记录 `min_agent_version`；低于则返回 `426`，agent 提示升级但�
 
 | 表 | 关键字段 | 说明 |
 | --- | --- | --- |
-| machines | machine_id, label, platform, arch, last_seen_at, status | 一台物理机 |
-| agents | machine_pk, token_hash, version, capabilities, revoked_at | 可多个（同机多命名空间） |
-| mounts | machine_pk, mount_id, label, physical_path, sentinel, fs_kind, flags, include, exclude, rules_hash, limits, schedule, state, manifest_epoch | 逻辑挂载点 |
-| paths | mount_pk, path_key, path_display, size, mtime_ns, content_hash, last_seen_at, last_hashed_at, last_hash_kind, volume_id, state, updated_at | 当前状态，`(mount_pk, path_key)` 唯一 |
+| machines | machine_id, label, hostname, platform, arch, last_seen_at, status | 一台物理机 |
+| agents | machine_pk, token_hash, version, protocol, capabilities, revoked_at | 可多个（同机多命名空间） |
+| mounts | machine_pk, mount_id, label, physical_path, sentinel, fs_kind, flags, include, exclude, rules_hash, limits, schedule, state, manifest_epoch, updated_at | 逻辑挂载点 |
+| paths | mount_pk, path_key, path_display(BLOB), size, mtime_ns(字符串), content_hash, volume_id, last_seen_job_pk, last_seen_at, last_hashed_at, last_hash_kind, state, change_epoch, updated_at | 当前状态，`(mount_pk, path_key)` 唯一 |
 | observations | path_pk, hash, algo, kind(baseline/scan/repair), observed_at | 仅哈希事件 |
-| issues | path_pk, type(mismatch/missing/unreadable), status, confidence, evidence, first_seen_at, resolved_at | 异常 |
-| scan_jobs | mount_pk, kind, status, lease_until, attempt, stats, timestamps | 任务 |
+| issues | path_pk, mount_pk, type(mismatch/missing/unreadable), status, confidence, evidence, occurrences, first_seen_at, last_seen_at, resolved_at | 异常；`(path_pk, type)` 唯一，恢复后重置不新开行 |
+| scan_jobs | mount_pk, mode, status, rules_hash, lease_until, attempt, cancel_requested, stats, timestamps | 任务；每 mount 仅一个活跃任务 |
 | scan_batches | job_pk, seq, received_at | 幂等去重 |
 | transfer_tickets | repair_pk, expected_hash, size, expires_at | 中转 |
 | repair_jobs | issue_pk, source_path_pk, target_path_pk, status, bytes_done, verify_result | 修复 |
@@ -337,6 +337,9 @@ hub 记录 `min_agent_version`；低于则返回 `426`，agent 提示升级但�
 
 - 保留策略：`observations` 默认 365 天（可按 mount 覆盖）；`audit_log` 永久（体积小）；`scan_batches` 任务完成后 7 天清理。
 - 规模：百万文件 → `paths` 约 200–300MB；每次全量扫描只追加变化的观测。
+- 时间约定：epoch 毫秒；`mtime_ns` 用十进制字符串（防 JS 精度丢失）；`path_display` 存 BLOB，wire 上再 base64。
+- 关键约束：每 mount 仅一个活跃任务（partial unique index）、每路径每类异常一条生命周期记录（`UNIQUE(path_pk,type)`）、路径增量靠 `change_epoch`（与 `mounts.manifest_epoch` 同事务自增）。
+- 索引：`paths(content_hash)`、`paths(mount_pk,state,last_hashed_at)`、`paths(mount_pk,last_seen_job_pk)`、`paths(mount_pk,change_epoch)`、`scan_jobs(status,lease_until)`、`audit_log(at)`。
 
 ## 8. 关键流程
 
@@ -441,3 +444,4 @@ hub 记录 `min_agent_version`；低于则返回 `426`，agent 提示升级但�
 | v0.3 | 2026-10-29 | 补充 agent 本地状态缓存（bbolt，用于跳过判定）；口令哈希改用 `node:crypto` scrypt（零原生依赖） |
 | v0.4 | 2026-10-29 | 增加清单同步：`manifest_epoch` + 流式 NDJSON 下发；缓存丢失不再触发全量重算；清单不做到期过滤（由 agent 本地比对）；规则变更不清缓存 |
 | v0.5 | 2026-10-29 | 增加清单全量对账兜底周期 `cache_full_resync_days`（默认 7 天，0 关闭） |
+| v0.6 | 2026-10-29 | 数据库结构评审：`mtime_ns` 改字符串防精度丢失、增量改用 `change_epoch`、补唯一索引 / CHECK 约束 / 索引与保留策略 |
