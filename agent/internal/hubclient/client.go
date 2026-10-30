@@ -56,11 +56,11 @@ type MountRef struct {
 }
 
 type EnrollResponse struct {
-	AgentID  int64      `json:"agent_id"`
-	Token    string     `json:"token"`
-	MachineID string    `json:"machine_id"`
-	Protocol int64      `json:"protocol"`
-	Mounts   []MountRef `json:"mounts"`
+	AgentID   int64      `json:"agent_id"`
+	Token     string     `json:"token"`
+	MachineID string     `json:"machine_id"`
+	Protocol  int64      `json:"protocol"`
+	Mounts    []MountRef `json:"mounts"`
 }
 
 type HeartbeatRequest struct {
@@ -76,13 +76,13 @@ type Job struct {
 }
 
 type HeartbeatResponse struct {
-	ServerTime  int64        `json:"server_time"`
-	DBInstance  string       `json:"db_instance"`
-	Job         *Job         `json:"job"`
-	Cancel      bool         `json:"cancel"`
-	Mounts      []MountRef   `json:"mounts"`
-	Transfers   []TransferTask `json:"transfers"`
-	Repairs     []RepairTask   `json:"repairs"`
+	ServerTime int64          `json:"server_time"`
+	DBInstance string         `json:"db_instance"`
+	Job        *Job           `json:"job"`
+	Cancel     bool           `json:"cancel"`
+	Mounts     []MountRef     `json:"mounts"`
+	Transfers  []TransferTask `json:"transfers"`
+	Repairs    []RepairTask   `json:"repairs"`
 }
 
 type TransferTask struct {
@@ -185,6 +185,33 @@ func (c *Client) Heartbeat(ctx context.Context, agentToken string, request Heart
 		return nil, err
 	}
 	return &response, nil
+}
+
+// JobSummary 是 agent 自己的历史任务摘要（来自 hub）。
+type JobSummary struct {
+	ID         int64          `json:"id"`
+	Mode       string         `json:"mode"`
+	Status     string         `json:"status"`
+	Attempt    int            `json:"attempt"`
+	CreatedAt  int64          `json:"created_at"`
+	StartedAt  *int64         `json:"started_at"`
+	FinishedAt *int64         `json:"finished_at"`
+	Stats      map[string]any `json:"stats"`
+	MountID    string         `json:"mount_id"`
+	MachineID  string         `json:"machine_id"`
+}
+
+// ListJobs 拉取本 agent 所属机器最近的扫描任务。
+func (c *Client) ListJobs(ctx context.Context, agentToken string, limit int) ([]JobSummary, error) {
+	if limit <= 0 {
+		limit = 20
+	}
+	var result []JobSummary
+	path := fmt.Sprintf("/api/v1/agent/jobs?limit=%d", limit)
+	if err := c.doJSON(ctx, http.MethodGet, path, agentToken, nil, nil, &result); err != nil {
+		return nil, err
+	}
+	return result, nil
 }
 
 // SubmitResults 上报一批结果。

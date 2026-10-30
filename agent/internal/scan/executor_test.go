@@ -163,3 +163,53 @@ func TestRunBaselineIncrementalAndFull(t *testing.T) {
 		t.Fatalf("full stats = %+v", stats)
 	}
 }
+
+func TestProgressCallback(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, filepath.Join(root, "a.txt"), "hello")
+	writeFile(t, filepath.Join(root, "b.txt"), "world")
+
+	cache, err := state.Open(filepath.Join(t.TempDir(), "state.db"))
+	if err != nil {
+		t.Fatalf("state.Open: %v", err)
+	}
+	defer cache.Close()
+
+	hub := newFakeHub(t)
+	var (
+		mu      sync.Mutex
+		samples []Progress
+	)
+	options := Options{
+		Mount:             testMount(root),
+		Job:               Job{ID: 10, MountID: "drill", Mode: "baseline"},
+		Cache:             cache,
+		Client:            hubclient.New(hub.server.URL, "test"),
+		AgentToken:        "token",
+		BatchSize:         100,
+		BatchInterval:     time.Hour,
+		KeepaliveInterval: time.Hour,
+		Progress: func(progress Progress) {
+			mu.Lock()
+			samples = append(samples, progress)
+			mu.Unlock()
+		},
+	}
+
+	stats, err := Run(context.Background(), options)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(samples) == 0 {
+		t.Fatal("expected progress callbacks")
+	}
+	last := samples[len(samples)-1]
+	if last.Seen != stats.Seen || last.Hashed != stats.Hashed || last.BytesRead != stats.BytesRead {
+		t.Fatalf("progress = %+v, stats = %+v", last, stats)
+	}
+	if last.Seen != 2 || last.Hashed != 2 {
+		t.Fatalf("unexpected progress totals: %+v", last)
+	}
+}

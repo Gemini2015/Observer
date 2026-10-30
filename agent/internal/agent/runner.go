@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
 
 	"observer/agent/internal/config"
@@ -34,6 +35,59 @@ type Runner struct {
 	Version string
 	Now     func() time.Time
 	token   string
+
+	progressMu sync.Mutex
+	current    *CurrentJob
+}
+
+// CurrentJob 是正在执行的巡检任务与实时进度。
+type CurrentJob struct {
+	JobID     int64         `json:"job_id"`
+	MountID   string        `json:"mount_id"`
+	Mode      string        `json:"mode"`
+	StartedAt int64         `json:"started_at"`
+	Progress  scan.Progress `json:"progress"`
+}
+
+func (r *Runner) setCurrent(job CurrentJob) {
+	r.progressMu.Lock()
+	r.current = &job
+	r.progressMu.Unlock()
+}
+
+func (r *Runner) clearCurrent() {
+	r.progressMu.Lock()
+	r.current = nil
+	r.progressMu.Unlock()
+}
+
+func (r *Runner) updateProgress(progress scan.Progress) {
+	r.progressMu.Lock()
+	if r.current != nil {
+		r.current.Progress = progress
+	}
+	r.progressMu.Unlock()
+}
+
+// CurrentJob 返回当前正在执行的任务快照；空闲时为 nil。
+func (r *Runner) CurrentJob() *CurrentJob {
+	r.progressMu.Lock()
+	defer r.progressMu.Unlock()
+	if r.current == nil {
+		return nil
+	}
+	snapshot := *r.current
+	return &snapshot
+}
+
+// RecentJobs 拉取本 agent 所属机器的历史任务（供桌面端展示）。
+func (r *Runner) RecentJobs(ctx context.Context, limit int) ([]hubclient.JobSummary, error) {
+	if r.token == "" {
+		if err := r.EnsureToken(ctx, os.Getenv("OBSERVER_ENROLL_TOKEN")); err != nil {
+			return nil, err
+		}
+	}
+	return r.Client.ListJobs(ctx, r.token, limit)
 }
 
 // New 创建运行器。
@@ -159,14 +213,29 @@ func (r *Runner) RunOnce(ctx context.Context) (scan.Stats, error) {
 		return scan.Stats{}, fmt.Errorf("hub dispatched unknown mount %q", beat.Job.MountID)
 	}
 
+	job := scan.Job{
+		ID:      beat.Job.ID,
+		MountPk: beat.Job.MountPk,
+		MountID: beat.Job.MountID,
+		Mode:    beat.Job.Mode,
+	}
+	r.setCurrent(CurrentJob{
+		JobID:     job.ID,
+		MountID:   job.MountID,
+		Mode:      job.Mode,
+		StartedAt: r.Now().UnixMilli(),
+	})
+	defer r.clearCurrent()
+
 	stats, err := scan.Run(ctx, scan.Options{
 		Mount:      mount,
-		Job:        scan.Job{ID: beat.Job.ID, MountPk: beat.Job.MountPk, MountID: beat.Job.MountID, Mode: beat.Job.Mode},
+		Job:        job,
 		Cache:      r.Cache,
 		Client:     r.Client,
 		AgentToken: r.token,
 		Spool:      r.Spool,
 		Now:        r.Now,
+		Progress:   r.updateProgress,
 	})
 	return stats, err
 }
@@ -341,10 +410,10 @@ func (r *Runner) syncManifests(ctx context.Context, beat *hubclient.HeartbeatRes
 }
 
 type manifestLine struct {
-	PathKey string `json:"k"`
-	Size    int64  `json:"s"`
-	MtimeNs string `json:"m"`
-	HashedAt int64 `json:"h"`
+	PathKey  string `json:"k"`
+	Size     int64  `json:"s"`
+	MtimeNs  string `json:"m"`
+	HashedAt int64  `json:"h"`
 }
 
 func (r *Runner) pullManifest(ctx context.Context, mountID string, mountPk int64) error {

@@ -21,12 +21,12 @@ import (
 )
 
 const (
-	defaultRecheckDays  = 90
-	defaultBatchSize    = 1000
-	defaultBatchWindow  = 2 * time.Second
-	defaultKeepalive    = 30 * time.Second
-	defaultReadBuffer   = 1 << 20
-	submitRetries       = 3
+	defaultRecheckDays = 90
+	defaultBatchSize   = 1000
+	defaultBatchWindow = 2 * time.Second
+	defaultKeepalive   = 30 * time.Second
+	defaultReadBuffer  = 1 << 20
+	submitRetries      = 3
 )
 
 // Job 是 hub 下发的任务。
@@ -50,6 +50,8 @@ type Options struct {
 	KeepaliveInterval time.Duration
 	Spool             *spool.Spool
 	Now               func() time.Time
+	// Progress 可选：巡检过程中节流回调（供桌面端展示实时进度）。
+	Progress func(Progress)
 }
 
 // Stats 汇总一轮巡检结果。
@@ -64,6 +66,17 @@ type Stats struct {
 	Spooled     int
 	DurationMs  int64
 	SkipReasons map[string]int
+}
+
+// Progress 是巡检过程中的增量进度快照（用于桌面端实时展示）。
+type Progress struct {
+	Seen       int   `json:"seen"`
+	Hashed     int64 `json:"hashed"`
+	Skipped    int   `json:"skipped"`
+	Unreadable int   `json:"unreadable"`
+	Unstable   int   `json:"unstable"`
+	Batches    int   `json:"batches"`
+	BytesRead  int64 `json:"bytes_read"`
 }
 
 // Run 执行任务。任务一定以 finish 收尾（完成/取消/掉盘）。
@@ -145,11 +158,30 @@ func Run(ctx context.Context, options Options) (Stats, error) {
 	skipHashing := job.Mode == "incremental"
 
 	var (
-		pending     []hubclient.Entry
-		lastFlush   = now()
-		seq         int64
-		flushError  error
+		pending    []hubclient.Entry
+		lastFlush  = now()
+		seq        int64
+		flushError error
+		lastReport time.Time
 	)
+	reportProgress := func(force bool) {
+		if options.Progress == nil {
+			return
+		}
+		if !force && time.Since(lastReport) < 250*time.Millisecond {
+			return
+		}
+		lastReport = time.Now()
+		options.Progress(Progress{
+			Seen:       stats.Seen,
+			Hashed:     stats.Hashed,
+			Skipped:    stats.Skipped,
+			Unreadable: stats.Unreadable,
+			Unstable:   stats.Unstable,
+			Batches:    stats.Batches,
+			BytesRead:  stats.BytesRead,
+		})
+	}
 	flush := func(force bool) error {
 		if flushError != nil {
 			return flushError
@@ -173,6 +205,7 @@ func Run(ctx context.Context, options Options) (Stats, error) {
 	}
 
 	walkErr := walker.New(mount.Path, mount.Rules).Walk(scanCtx, func(entry walker.Entry) error {
+		defer reportProgress(false)
 		if flushError != nil {
 			return flushError
 		}
@@ -256,6 +289,7 @@ func Run(ctx context.Context, options Options) (Stats, error) {
 		keepaliveWG.Wait()
 	}
 	keepaliveCancel()
+	reportProgress(true)
 
 	if walkErr != nil && !errors.Is(walkErr, context.Canceled) && flushError == nil {
 		flushError = walkErr
@@ -322,15 +356,15 @@ func finish(
 
 func statsMap(stats Stats) map[string]any {
 	return map[string]any{
-		"seen":        stats.Seen,
-		"hashed":      stats.Hashed,
-		"skipped":     stats.Skipped,
-		"unreadable":  stats.Unreadable,
-		"unstable":    stats.Unstable,
-		"bytes_read":  stats.BytesRead,
-		"batches":     stats.Batches,
-		"spooled":     stats.Spooled,
-		"duration_ms": stats.DurationMs,
+		"seen":         stats.Seen,
+		"hashed":       stats.Hashed,
+		"skipped":      stats.Skipped,
+		"unreadable":   stats.Unreadable,
+		"unstable":     stats.Unstable,
+		"bytes_read":   stats.BytesRead,
+		"batches":      stats.Batches,
+		"spooled":      stats.Spooled,
+		"duration_ms":  stats.DurationMs,
 		"skip_reasons": stats.SkipReasons,
 	}
 }
