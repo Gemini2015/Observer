@@ -123,7 +123,12 @@ type Agent struct {
 	MachineID           string `yaml:"machine_id"`
 	Label               string `yaml:"label"`
 	Hub                 string `yaml:"hub"`
-	TokenFile           string `yaml:"token_file"`
+	// Token 是直接写在配置里的 agent token（免 token 文件）；优先于 token_file。
+	Token string `yaml:"token"`
+	// TokenFile 是 token 文件路径；与 Token 二选一。token 文件所在目录同时存放缓存与 spool。
+	TokenFile string `yaml:"token_file"`
+	// StateDir 是缓存/spool 目录；默认 token_file 所在目录，内联 token 时默认 .observer/<machine_id>。
+	StateDir            string `yaml:"state_dir"`
 	CacheFullResyncDays int    `yaml:"cache_full_resync_days"`
 }
 
@@ -173,8 +178,15 @@ func (c *Config) validate() error {
 	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") {
 		return fmt.Errorf("agent.hub %q must be an http(s) URL", c.Agent.Hub)
 	}
-	if c.Agent.TokenFile == "" {
+	if c.Agent.Token == "" && c.Agent.TokenFile == "" {
 		c.Agent.TokenFile = ".observer/token"
+	}
+	if c.Agent.StateDir == "" {
+		if c.Agent.TokenFile != "" {
+			c.Agent.StateDir = filepath.Dir(c.Agent.TokenFile)
+		} else {
+			c.Agent.StateDir = filepath.Join(".observer", c.Agent.MachineID)
+		}
 	}
 	if c.Agent.CacheFullResyncDays == 0 {
 		c.Agent.CacheFullResyncDays = defaultCacheDays

@@ -50,3 +50,6 @@ Thumbs.db
 .idea/
 .vscode/
 *.swp
+
+# ---- agent 运行时状态（默认 state_dir） ----
+.observer/

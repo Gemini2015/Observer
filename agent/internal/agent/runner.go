@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -37,7 +38,10 @@ type Runner struct {
 
 // New 创建运行器。
 func New(cfg *config.Config, version string) (*Runner, error) {
-	baseDir := filepath.Dir(cfg.Agent.TokenFile)
+	baseDir := cfg.Agent.StateDir
+	if baseDir == "" {
+		baseDir = filepath.Dir(cfg.Agent.TokenFile)
+	}
 	if err := os.MkdirAll(baseDir, 0o755); err != nil {
 		return nil, err
 	}
@@ -65,29 +69,64 @@ func (r *Runner) Close() error {
 	return r.Cache.Close()
 }
 
-// EnsureToken 读取本地 token；没有则用一次性 token 注册。
+// EnsureToken 解析长期 agent token：
+//  1. state_dir/agent.token（首次注册后缓存）
+//  2. token_file（旧方式）
+//  3. 内联 agent.token：先当作一次性注册 token 换取长期 token 并缓存；
+//     若 hub 返回 401，则视为已经是长期 agent token 直接使用。
+//  4. OBSERVER_ENROLL_TOKEN / --enroll-token 首次注册并写入 token_file。
 func (r *Runner) EnsureToken(ctx context.Context, enrollToken string) error {
-	tokenPath := r.Config.Agent.TokenFile
-	if data, err := os.ReadFile(tokenPath); err == nil {
-		token := strings.TrimSpace(string(data))
-		if token != "" {
+	cachedPath := filepath.Join(r.Config.Agent.StateDir, "agent.token")
+	if data, err := os.ReadFile(cachedPath); err == nil {
+		if token := strings.TrimSpace(string(data)); token != "" {
 			r.token = token
 			return nil
 		}
 	}
+
+	if r.Config.Agent.TokenFile != "" {
+		if data, err := os.ReadFile(r.Config.Agent.TokenFile); err == nil {
+			if token := strings.TrimSpace(string(data)); token != "" {
+				r.token = token
+				return nil
+			}
+		}
+	}
+
+	inline := strings.TrimSpace(r.Config.Agent.Token)
+	if inline != "" {
+		response, err := r.Client.Enroll(ctx, inline, r.enrollRequest())
+		if err == nil {
+			if writeErr := os.WriteFile(cachedPath, []byte(response.Token+"\n"), 0o600); writeErr != nil {
+				return fmt.Errorf("save agent token: %w", writeErr)
+			}
+			r.token = response.Token
+			return nil
+		}
+		var problem *hubclient.Problem
+		if errors.As(err, &problem) && problem.Status == http.StatusUnauthorized {
+			// 配置里已经是长期 agent token
+			r.token = inline
+			return nil
+		}
+		return fmt.Errorf("inline token enroll: %w", err)
+	}
+
 	if enrollToken == "" {
 		enrollToken = os.Getenv("OBSERVER_ENROLL_TOKEN")
 	}
 	if enrollToken == "" {
-		return errors.New("agent not enrolled: set OBSERVER_ENROLL_TOKEN or pass --enroll-token")
+		return errors.New("agent not enrolled: set agent.token, OBSERVER_ENROLL_TOKEN or pass --enroll-token")
 	}
 
 	response, err := r.Client.Enroll(ctx, enrollToken, r.enrollRequest())
 	if err != nil {
 		return fmt.Errorf("enroll: %w", err)
 	}
-	if err := os.WriteFile(tokenPath, []byte(response.Token+"\n"), 0o600); err != nil {
-		return fmt.Errorf("save token: %w", err)
+	if r.Config.Agent.TokenFile != "" {
+		if err := os.WriteFile(r.Config.Agent.TokenFile, []byte(response.Token+"\n"), 0o600); err != nil {
+			return fmt.Errorf("save token: %w", err)
+		}
 	}
 	r.token = response.Token
 	return nil
@@ -174,8 +213,10 @@ func (r *Runner) Doctor(ctx context.Context) error {
 		}
 	}
 
-	if _, err := os.Stat(r.Config.Agent.TokenFile); err != nil {
-		problems = append(problems, fmt.Sprintf("token file %s: %v", r.Config.Agent.TokenFile, err))
+	if r.Config.Agent.Token == "" && r.Config.Agent.TokenFile != "" {
+		if _, err := os.Stat(r.Config.Agent.TokenFile); err != nil {
+			problems = append(problems, fmt.Sprintf("token file %s: %v", r.Config.Agent.TokenFile, err))
+		}
 	}
 
 	if err := r.Client.Health(ctx); err != nil {

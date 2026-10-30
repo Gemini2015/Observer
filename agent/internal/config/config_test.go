@@ -163,3 +163,35 @@ func TestWindowValidation(t *testing.T) {
 		t.Fatal("expected invalid window error")
 	}
 }
+
+func TestInlineTokenConfig(t *testing.T) {
+	dir := filepath.ToSlash(t.TempDir())
+	raw := fmt.Sprintf("agent:\n  machine_id: test-agent\n  hub: http://x\n  token: inline-token-abc\nmounts:\n  - id: a\n    path: %q\n", dir)
+	cfg, err := Parse([]byte(raw))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if cfg.Agent.Token != "inline-token-abc" {
+		t.Errorf("token = %q", cfg.Agent.Token)
+	}
+	if cfg.Agent.TokenFile != "" {
+		t.Errorf("inline token should not default token file, got %q", cfg.Agent.TokenFile)
+	}
+	wantState := filepath.Join(".observer", "test-agent")
+	if cfg.Agent.StateDir != wantState {
+		t.Errorf("state dir = %q, want %q", cfg.Agent.StateDir, wantState)
+	}
+}
+
+func TestExplicitStateDir(t *testing.T) {
+	dir := filepath.ToSlash(t.TempDir())
+	stateDir := filepath.ToSlash(filepath.Join(t.TempDir(), "state"))
+	raw := fmt.Sprintf("agent:\n  machine_id: test-agent\n  hub: http://x\n  token: inline-token-abc\n  state_dir: %q\nmounts:\n  - id: a\n    path: %q\n", stateDir, dir)
+	cfg, err := Parse([]byte(raw))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if cfg.Agent.StateDir != stateDir {
+		t.Errorf("state dir = %q, want %q", cfg.Agent.StateDir, stateDir)
+	}
+}
