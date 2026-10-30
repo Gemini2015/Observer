@@ -178,6 +178,44 @@ func (c *Client) Enroll(ctx context.Context, enrollToken string, request EnrollR
 	return &response, nil
 }
 
+// IdentityMount 是 hub 上已注册 mount 的完整配置（用于重连时自动填充）。
+type IdentityMount struct {
+	MountID       string         `json:"mount_id"`
+	Label         string         `json:"label"`
+	PhysicalPath  string         `json:"physical_path"`
+	Sentinel      string         `json:"sentinel"`
+	FSKind        string         `json:"fs_kind"`
+	CaseSensitive string         `json:"case_sensitive"`
+	Unicode       string         `json:"unicode"`
+	Include       []string       `json:"include"`
+	Exclude       []string       `json:"exclude"`
+	RulesHash     string         `json:"rules_hash"`
+	Limits        map[string]any `json:"limits"`
+	Schedule      map[string]any `json:"schedule"`
+	RepairAllowed bool           `json:"repair_allowed"`
+	State         string         `json:"state"`
+}
+
+// IdentityResponse 是接入 token 对应节点的身份与挂载点。
+type IdentityResponse struct {
+	AgentID   int64           `json:"agent_id"`
+	MachineID string          `json:"machine_id"`
+	Label     string          `json:"label"`
+	Hostname  string          `json:"hostname"`
+	Platform  string          `json:"platform"`
+	Arch      string          `json:"arch"`
+	Mounts    []IdentityMount `json:"mounts"`
+}
+
+// Identity 用长期 agent token 校验身份并拉取自己的挂载点配置。
+func (c *Client) Identity(ctx context.Context, agentToken string) (*IdentityResponse, error) {
+	var response IdentityResponse
+	if err := c.doJSON(ctx, http.MethodGet, "/api/v1/agent/identity", agentToken, nil, nil, &response); err != nil {
+		return nil, err
+	}
+	return &response, nil
+}
+
 // Heartbeat 发送心跳，返回任务与清单版本。
 func (c *Client) Heartbeat(ctx context.Context, agentToken string, request HeartbeatRequest) (*HeartbeatResponse, error) {
 	var response HeartbeatResponse
@@ -344,6 +382,12 @@ func decodeProblem(response *http.Response) error {
 		}
 	}
 	return problem
+}
+
+// IsUnauthorized 判断是否为 token 无效/被撤销（401）。
+func IsUnauthorized(err error) bool {
+	problem, ok := err.(*Problem)
+	return ok && problem.Status == http.StatusUnauthorized
 }
 
 // IsRetryable 判断错误是否值得重试（网络错误或 5xx）。
