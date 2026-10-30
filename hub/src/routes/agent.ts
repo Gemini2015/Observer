@@ -8,6 +8,7 @@ import {
   FinishSchema,
   HeartbeatInput,
   IdParam,
+  MountSyncSchema,
   OffsetQuery,
   RepairResultSchema,
   ResultBatchSchema,
@@ -24,6 +25,7 @@ import {
 } from '../services/jobs.js';
 import { processBatch } from '../services/ingest.js';
 import { streamManifest } from '../services/manifest.js';
+import { syncAgentMounts } from '../services/mount-sync.js';
 import {
   agentRepairTasks,
   agentTransferTasks,
@@ -81,6 +83,12 @@ export function registerAgentRoutes(app: FastifyInstance, ctx: RouteContext): vo
       transfers: agentTransferTasks(ctx.db, agent.machine_pk),
       repairs: agentRepairTasks(ctx.db, agent.machine_pk),
     };
+  });
+
+  app.put('/api/v1/agent/mounts', async (request) => {
+    const agent = requireAgent(ctx.db, request);
+    const body = MountSyncSchema.parse(request.body);
+    return syncAgentMounts(ctx.db, agent, body.mounts);
   });
 
   app.get('/api/v1/agent/jobs', async (request) => {

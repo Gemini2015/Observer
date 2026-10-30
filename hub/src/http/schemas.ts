@@ -92,3 +92,7 @@ export const CreateEnrollTokenSchema = z.object({
 export const AgentJobsQuery = z.object({
   limit: z.coerce.number().int().min(1).max(100).default(20),
 });
+
+export const MountSyncSchema = z.object({
+  mounts: z.array(MountInput).min(1).max(256),
+});
