@@ -18,6 +18,7 @@ import (
 
 	agentcore "observer/agent/internal/agent"
 	"observer/agent/internal/config"
+	"observer/agent/internal/hubclient"
 	"observer/agent/internal/scan"
 	"observer/agent/internal/version"
 )
@@ -42,14 +43,16 @@ type RunSummary struct {
 
 // Status 通过 Wails 事件推送给前端。
 type Status struct {
-	MachineID string      `json:"machine_id"`
-	Hub       string      `json:"hub"`
-	Paused    bool        `json:"paused"`
-	Running   bool        `json:"running"`
-	Connected bool        `json:"connected"`
-	LastError string      `json:"last_error"`
-	LastRunAt int64       `json:"last_run_at"`
-	LastStats *RunSummary `json:"last_stats"`
+	MachineID  string                 `json:"machine_id"`
+	Hub        string                 `json:"hub"`
+	Paused     bool                   `json:"paused"`
+	Running    bool                   `json:"running"`
+	Connected  bool                   `json:"connected"`
+	LastError  string                 `json:"last_error"`
+	LastRunAt  int64                  `json:"last_run_at"`
+	LastStats  *RunSummary            `json:"last_stats"`
+	Current    *agentcore.CurrentJob  `json:"current"`
+	RecentJobs []hubclient.JobSummary `json:"recent_jobs"`
 }
 
 type controller struct {
@@ -233,6 +236,13 @@ func (c *controller) runLoop(ctx context.Context) {
 			return
 		}
 
+		// 任务历史独立于暂停状态刷新；失败时保留旧值。
+		if jobs, err := runner.RecentJobs(ctx, 20); err == nil {
+			c.mu.Lock()
+			c.status.RecentJobs = jobs
+			c.mu.Unlock()
+		}
+
 		if !paused {
 			c.mu.Lock()
 			c.status.Running = true
@@ -282,7 +292,11 @@ func (c *controller) emit() {
 	}
 	c.mu.Lock()
 	snapshot := c.status
+	runner := c.runner
 	c.mu.Unlock()
+	if runner != nil {
+		snapshot.Current = runner.CurrentJob()
+	}
 	c.app.Event.Emit("status", snapshot)
 }
 

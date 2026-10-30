@@ -32,9 +32,37 @@
         </div>
       </section>
 
+      <section class="card hidden" id="current-card">
+        <h2>当前任务</h2>
+        <div id="current-title" class="current-title">-</div>
+        <div class="progress"><span></span></div>
+        <div id="current-detail" class="muted">-</div>
+      </section>
+
       <section class="card">
         <h2>最近一轮统计</h2>
         <div id="stats" class="stats">暂无</div>
+      </section>
+
+      <section class="card">
+        <h2>最近任务</h2>
+        <table class="jobs">
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>挂载点</th>
+              <th>模式</th>
+              <th>状态</th>
+              <th>开始</th>
+              <th>结果</th>
+            </tr>
+          </thead>
+          <tbody id="jobs">
+            <tr>
+              <td colspan="6" class="muted">暂无任务</td>
+            </tr>
+          </tbody>
+        </table>
       </section>
 
       <section class="card">
@@ -43,7 +71,7 @@
       </section>
 
       <footer>
-        <a id="hub-link" href="#" data-wml-openURL>打开 hub Web</a>
+        <button id="open-hub" class="ghost" type="button">打开 hub Web</button>
         <span class="muted">关闭窗口会隐藏到托盘，巡检继续</span>
       </footer>
     </div>

@@ -118,9 +118,76 @@ footer {
   font-size: 13px;
 }
 
-footer a {
+button.ghost {
+  background: transparent;
   color: var(--accent);
-  text-decoration: none;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+button.ghost:hover {
+  background: rgba(56, 189, 248, 0.1);
+}
+
+.hidden {
+  display: none;
+}
+
+.current-title {
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+
+.progress {
+  height: 8px;
+  border-radius: 999px;
+  background: #1e293b;
+  overflow: hidden;
+  margin-bottom: 8px;
+}
+
+.progress span {
+  display: block;
+  width: 35%;
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, transparent, var(--accent), transparent);
+  animation: progress-slide 1.2s ease-in-out infinite;
+}
+
+@keyframes progress-slide {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(320%);
+  }
+}
+
+table.jobs {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+table.jobs th,
+table.jobs td {
+  text-align: left;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+table.jobs th {
+  color: var(--muted);
+  font-weight: 600;
+}
+
+table.jobs tr:last-child td {
+  border-bottom: none;
 }
 
 .muted {
