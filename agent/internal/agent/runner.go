@@ -27,13 +27,15 @@ const manifestBatchSize = 10_000
 
 // Runner 是 agent 的运行器。
 type Runner struct {
-	Config  *config.Config
-	Client  *hubclient.Client
-	Cache   *state.Cache
-	Spool   *spool.Spool
-	Version string
-	Now     func() time.Time
-	token   string
+	Config      *config.Config
+	Client      *hubclient.Client
+	Cache       *state.Cache
+	Spool       *spool.Spool
+	Version     string
+	Now         func() time.Time
+	token       string
+	tokenMu     sync.Mutex
+	tokenInitMu sync.Mutex
 
 	mountsSynced bool
 
@@ -81,14 +83,54 @@ func (r *Runner) CurrentJob() *CurrentJob {
 	return &snapshot
 }
 
+func (r *Runner) setToken(token string) {
+	r.tokenMu.Lock()
+	r.token = token
+	r.tokenMu.Unlock()
+}
+
+func (r *Runner) agentToken() string {
+	r.tokenMu.Lock()
+	defer r.tokenMu.Unlock()
+	return r.token
+}
+
+func (r *Runner) ensureFileToken(ctx context.Context) error {
+	if r.agentToken() != "" {
+		return nil
+	}
+	r.tokenInitMu.Lock()
+	defer r.tokenInitMu.Unlock()
+	if r.agentToken() != "" {
+		return nil
+	}
+	return r.EnsureToken(ctx, os.Getenv("OBSERVER_ENROLL_TOKEN"))
+}
+
+// ListFiles 拉取本 agent 所属 machine 的文件列表（供桌面端文件页使用）。
+func (r *Runner) ListFiles(ctx context.Context, query hubclient.FileQuery) (*hubclient.FileListResponse, error) {
+	if err := r.ensureFileToken(ctx); err != nil {
+		return nil, err
+	}
+	return r.Client.ListFiles(ctx, r.agentToken(), query)
+}
+
+// FileDetail 拉取本 agent 所属 machine 的单个文件详情。
+func (r *Runner) FileDetail(ctx context.Context, pathID int64) (*hubclient.FileDetailResponse, error) {
+	if err := r.ensureFileToken(ctx); err != nil {
+		return nil, err
+	}
+	return r.Client.FileDetail(ctx, r.agentToken(), pathID)
+}
+
 // RecentJobs 拉取本 agent 所属机器的历史任务（供桌面端展示）。
 func (r *Runner) RecentJobs(ctx context.Context, limit int) ([]hubclient.JobSummary, error) {
-	if r.token == "" {
+	if r.agentToken() == "" {
 		if err := r.EnsureToken(ctx, os.Getenv("OBSERVER_ENROLL_TOKEN")); err != nil {
 			return nil, err
 		}
 	}
-	return r.Client.ListJobs(ctx, r.token, limit)
+	return r.Client.ListJobs(ctx, r.agentToken(), limit)
 }
 
 // New 创建运行器。
@@ -139,13 +181,13 @@ func (r *Runner) EnsureToken(ctx context.Context, enrollToken string) error {
 				if err := r.checkIdentity(identity); err != nil {
 					return err
 				}
-				r.token = token
+				r.setToken(token)
 				return nil
 			case hubclient.IsUnauthorized(identityErr):
 				// 缓存 token 已被撤销/轮换：继续尝试配置里的新 token。
 			default:
 				// hub 暂时不可达时保持离线启动能力，后续心跳会暴露网络错误。
-				r.token = token
+				r.setToken(token)
 				return nil
 			}
 		}
@@ -181,7 +223,7 @@ func (r *Runner) EnsureToken(ctx context.Context, enrollToken string) error {
 			if err := r.saveToken(cachedPath, candidate); err != nil {
 				return err
 			}
-			r.token = candidate
+			r.setToken(candidate)
 			return nil
 		}
 		if !hubclient.IsUnauthorized(err) {
@@ -193,7 +235,7 @@ func (r *Runner) EnsureToken(ctx context.Context, enrollToken string) error {
 			if err := r.saveToken(cachedPath, response.Token); err != nil {
 				return err
 			}
-			r.token = response.Token
+			r.setToken(response.Token)
 			return nil
 		}
 		if !hubclient.IsUnauthorized(enrollErr) {
@@ -214,7 +256,7 @@ func (r *Runner) EnsureToken(ctx context.Context, enrollToken string) error {
 		if err := r.saveToken(cachedPath, response.Token); err != nil {
 			return err
 		}
-		r.token = response.Token
+		r.setToken(response.Token)
 		return nil
 	}
 
@@ -252,7 +294,7 @@ func (r *Runner) saveToken(cachedPath, token string) error {
 
 // RunOnce 执行一轮：补发 spool → 心跳 → 清单同步 → 执行任务（如有）。
 func (r *Runner) RunOnce(ctx context.Context) (scan.Stats, error) {
-	if r.token == "" {
+	if r.agentToken() == "" {
 		if err := r.EnsureToken(ctx, os.Getenv("OBSERVER_ENROLL_TOKEN")); err != nil {
 			return scan.Stats{}, err
 		}
@@ -264,7 +306,7 @@ func (r *Runner) RunOnce(ctx context.Context) (scan.Stats, error) {
 
 	r.flushSpool(ctx)
 
-	beat, err := r.Client.Heartbeat(ctx, r.token, hubclient.HeartbeatRequest{AgentVersion: r.Version})
+	beat, err := r.Client.Heartbeat(ctx, r.agentToken(), hubclient.HeartbeatRequest{AgentVersion: r.Version})
 	if err != nil {
 		return scan.Stats{}, fmt.Errorf("heartbeat: %w", err)
 	}
@@ -300,7 +342,7 @@ func (r *Runner) RunOnce(ctx context.Context) (scan.Stats, error) {
 		Job:        job,
 		Cache:      r.Cache,
 		Client:     r.Client,
-		AgentToken: r.token,
+		AgentToken: r.agentToken(),
 		Spool:      r.Spool,
 		Now:        r.Now,
 		Progress:   r.updateProgress,
@@ -311,12 +353,12 @@ func (r *Runner) RunOnce(ctx context.Context) (scan.Stats, error) {
 // processRepairs 处理心跳下发的修复中转/应用任务（每轮最多各一个）。
 func (r *Runner) processRepairs(ctx context.Context, beat *hubclient.HeartbeatResponse) {
 	for _, task := range beat.Transfers {
-		if err := repair.UploadSource(ctx, r.Client, r.token, r.Config, task); err != nil && !errors.Is(err, context.Canceled) {
+		if err := repair.UploadSource(ctx, r.Client, r.agentToken(), r.Config, task); err != nil && !errors.Is(err, context.Canceled) {
 			fmt.Fprintf(os.Stderr, "observer-agent: repair upload %d: %v\n", task.TicketID, err)
 		}
 	}
 	for _, task := range beat.Repairs {
-		if err := repair.ApplyTarget(ctx, r.Client, r.token, r.Config, task); err != nil && !errors.Is(err, context.Canceled) {
+		if err := repair.ApplyTarget(ctx, r.Client, r.agentToken(), r.Config, task); err != nil && !errors.Is(err, context.Canceled) {
 			fmt.Fprintf(os.Stderr, "observer-agent: repair apply %d: %v\n", task.RepairID, err)
 		}
 	}
@@ -381,7 +423,7 @@ func (r *Runner) ensureMountsSynced(ctx context.Context) error {
 	if r.mountsSynced {
 		return nil
 	}
-	if _, err := r.Client.SyncMounts(ctx, r.token, r.enrollMounts()); err != nil {
+	if _, err := r.Client.SyncMounts(ctx, r.agentToken(), r.enrollMounts()); err != nil {
 		return fmt.Errorf("sync mounts: %w", err)
 	}
 	r.mountsSynced = true
@@ -447,7 +489,7 @@ func (r *Runner) flushSpool(ctx context.Context) {
 	}
 	remaining := make([]spool.Batch, 0, len(batches))
 	for _, batch := range batches {
-		_, submitErr := r.Client.SubmitResults(ctx, r.token, batch.JobID, batch.Seq, batch.Entries)
+		_, submitErr := r.Client.SubmitResults(ctx, r.agentToken(), batch.JobID, batch.Seq, batch.Entries)
 		if submitErr == nil {
 			continue
 		}
@@ -502,7 +544,7 @@ type manifestLine struct {
 }
 
 func (r *Runner) pullManifest(ctx context.Context, mountID string, mountPk int64) error {
-	body, err := r.Client.Manifest(ctx, r.token, mountPk)
+	body, err := r.Client.Manifest(ctx, r.agentToken(), mountPk)
 	if err != nil {
 		return err
 	}

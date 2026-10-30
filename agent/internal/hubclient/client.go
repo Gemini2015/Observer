@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -211,6 +212,155 @@ type IdentityResponse struct {
 func (c *Client) Identity(ctx context.Context, agentToken string) (*IdentityResponse, error) {
 	var response IdentityResponse
 	if err := c.doJSON(ctx, http.MethodGet, "/api/v1/agent/identity", agentToken, nil, nil, &response); err != nil {
+		return nil, err
+	}
+	return &response, nil
+}
+
+// FileQuery 是 agent 本机文件列表查询参数。
+type FileQuery struct {
+	Q       string
+	MountID string
+	State   string
+	Issue   string
+	Hash    string
+	SizeMin *int64
+	SizeMax *int64
+	Sort    string
+	Order   string
+	Limit   int
+	Offset  int
+}
+
+type FileSummary struct {
+	Total         int `json:"total"`
+	Active        int `json:"active"`
+	Missing       int `json:"missing"`
+	OutOfScope    int `json:"out_of_scope"`
+	Hashed        int `json:"hashed"`
+	Unhashed      int `json:"unhashed"`
+	OpenIssuePath int `json:"open_issue_paths"`
+}
+
+type FileItem struct {
+	ID             int64  `json:"id"`
+	MachineID      string `json:"machine_id"`
+	MachineLabel   string `json:"machine_label"`
+	MountPk        int64  `json:"mount_pk"`
+	MountID        string `json:"mount_id"`
+	MountLabel     string `json:"mount_label"`
+	PathKey        string `json:"path_key"`
+	PathDisplayB64 string `json:"path_display_b64"`
+	State          string `json:"state"`
+	Size           int64  `json:"size"`
+	MtimeNs        string `json:"mtime_ns"`
+	ContentHash    string `json:"content_hash"`
+	LastSeenAt     *int64 `json:"last_seen_at"`
+	LastHashedAt   *int64 `json:"last_hashed_at"`
+	LastHashKind   string `json:"last_hash_kind"`
+	OpenIssueCount int    `json:"open_issue_count"`
+}
+
+type FileListResponse struct {
+	Items   []FileItem  `json:"items"`
+	Total   int         `json:"total"`
+	Limit   int         `json:"limit"`
+	Offset  int         `json:"offset"`
+	Summary FileSummary `json:"summary"`
+}
+
+type FileIssue struct {
+	ID          int64  `json:"id"`
+	Type        string `json:"type"`
+	Status      string `json:"status"`
+	Confidence  string `json:"confidence"`
+	Occurrences int    `json:"occurrences"`
+	FirstSeenAt int64  `json:"first_seen_at"`
+	LastSeenAt  int64  `json:"last_seen_at"`
+	Evidence    any    `json:"evidence"`
+}
+
+type FileObservation struct {
+	Hash       string `json:"hash"`
+	Kind       string `json:"kind"`
+	ObservedAt int64  `json:"observed_at"`
+}
+
+type FileMachineDetail struct {
+	MachineID string `json:"machine_id"`
+	Label     string `json:"label"`
+	Status    string `json:"status"`
+	Platform  string `json:"platform"`
+}
+
+type FileMountDetail struct {
+	ID           int64  `json:"id"`
+	MountID      string `json:"mount_id"`
+	Label        string `json:"label"`
+	PhysicalPath string `json:"physical_path"`
+	State        string `json:"state"`
+}
+
+type FileDetailResponse struct {
+	File         FileItem          `json:"file"`
+	Machine      FileMachineDetail `json:"machine"`
+	Mount        FileMountDetail   `json:"mount"`
+	Issues       []FileIssue       `json:"issues"`
+	Observations []FileObservation `json:"observations"`
+}
+
+// ListFiles 拉取 token 所属 machine 的文件列表。
+func (c *Client) ListFiles(ctx context.Context, agentToken string, query FileQuery) (*FileListResponse, error) {
+	values := url.Values{}
+	if query.Q != "" {
+		values.Set("q", query.Q)
+	}
+	if query.MountID != "" {
+		values.Set("mount_id", query.MountID)
+	}
+	if query.State != "" {
+		values.Set("state", query.State)
+	}
+	if query.Issue != "" {
+		values.Set("issue", query.Issue)
+	}
+	if query.Hash != "" {
+		values.Set("hash", query.Hash)
+	}
+	if query.SizeMin != nil {
+		values.Set("size_min", strconv.FormatInt(*query.SizeMin, 10))
+	}
+	if query.SizeMax != nil {
+		values.Set("size_max", strconv.FormatInt(*query.SizeMax, 10))
+	}
+	if query.Sort != "" {
+		values.Set("sort", query.Sort)
+	}
+	if query.Order != "" {
+		values.Set("order", query.Order)
+	}
+	if query.Limit > 0 {
+		values.Set("limit", strconv.Itoa(query.Limit))
+	}
+	if query.Offset > 0 {
+		values.Set("offset", strconv.Itoa(query.Offset))
+	}
+	var response FileListResponse
+	path := "/api/v1/agent/files"
+	if encoded := values.Encode(); encoded != "" {
+		path += "?" + encoded
+	}
+	if err := c.doJSON(ctx, http.MethodGet, path, agentToken, nil, nil, &response); err != nil {
+		return nil, err
+	}
+	return &response, nil
+}
+
+// FileDetail 拉取 token 所属 machine 的单个文件详情。
+func (c *Client) FileDetail(ctx context.Context, agentToken string, pathID int64) (*FileDetailResponse, error) {
+	var response FileDetailResponse
+	path := fmt.Sprintf("/api/v1/agent/files/%d", pathID)
+	if err := c.doJSON(ctx, http.MethodGet, path, agentToken, nil, nil, &response); err != nil {
 		return nil, err
 	}
 	return &response, nil
