@@ -121,7 +121,10 @@ wails3 build
 .\bin\observer-agent-desktop.exe
 ```
 
-- 不传 `-config` 时，默认读取 **exe 同级目录下的 `agent.yaml`**；也可显式指定：`-config D:\Observer\agent.yaml`。
+- **首次启动**：没有 `agent.yaml` / 配置未完成时会直接进入 GUI 配置向导（机器 ID、hub、注册 token、挂载点），点击「保存并启动」后自动生成 exe 同级 `agent.yaml` 并开始巡检。
+- 主界面「设置」页可修改显示名称与挂载点的显示名/目录/sentinel/排除规则/修复开关，可新增/删除挂载点；新增挂载点后需在 hub Web 触发一次基线巡检。删除为软删除（hub 保留历史数据）。
+- 机器 ID/hub/token/状态目录为只读；调度、限速、只读等高级配置仍编辑 YAML（设置保存不会丢失这些字段）。
+- 不传 `-config` 时默认读取 exe 同级 `agent.yaml`；也可显式指定：`-config D:\Observer\agent.yaml`。
 - 启动时会把工作目录切到配置文件所在目录，配置里的相对路径（`state_dir`、`mounts[].path`）都相对该目录解析。
 - 关闭窗口隐藏到托盘，巡检继续；单实例；托盘菜单可暂停/打开 hub/开机启动（自启会携带当前配置的绝对路径）。
 - macOS 构建、签名与公证见 [DEPLOY §5](DEPLOY.md#5-macos)。
