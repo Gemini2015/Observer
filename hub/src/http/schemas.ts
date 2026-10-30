@@ -83,3 +83,8 @@ export const RepairResultSchema = z.object({
   size: z.number().int().min(0).optional(),
   mtime_ns: z.string().regex(/^\d{1,20}$/).optional(),
 });
+
+export const CreateEnrollTokenSchema = z.object({
+  machine_hint: z.string().min(1).max(128).optional(),
+  ttl_hours: z.number().int().min(1).max(720).default(24),
+});
