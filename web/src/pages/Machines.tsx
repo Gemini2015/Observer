@@ -8,11 +8,14 @@ import {
   statusClass,
   type EnrollTokenResult,
   type Machine,
+  type MountRef,
 } from '../api';
 
 export default function MachinesPage() {
   const [machines, setMachines] = useState<Machine[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState<string | null>(null);
   const [showTokenForm, setShowTokenForm] = useState(false);
   const [machineHint, setMachineHint] = useState('');
   const [ttlHours, setTtlHours] = useState(24);
@@ -57,6 +60,46 @@ export default function MachinesPage() {
       await navigator.clipboard.writeText(issued.token);
     } catch {
       // 剪贴板不可用时用户可手动选中复制
+    }
+  };
+
+  const removeMachine = async (machine: Machine) => {
+    if (
+      !window.confirm(
+        `删除机器「${machine.machine_id}」及其全部挂载点与巡检数据？\n此操作不可恢复；删除后该 agent 需要重新注册。`,
+      )
+    ) {
+      return;
+    }
+    setDeleting(`machine-${machine.id}`);
+    setActionError(null);
+    try {
+      await api(`/api/v1/machines/${machine.id}`, { method: 'DELETE' });
+      load();
+    } catch (err) {
+      setActionError((err as Error).message);
+    } finally {
+      setDeleting(null);
+    }
+  };
+
+  const removeMount = async (machine: Machine, mount: MountRef) => {
+    if (
+      !window.confirm(
+        `删除挂载点「${machine.machine_id}/${mount.mount_id}」及其巡检数据？\n此操作不可恢复；重新添加需要重新注册该挂载点。`,
+      )
+    ) {
+      return;
+    }
+    setDeleting(`mount-${mount.id}`);
+    setActionError(null);
+    try {
+      await api(`/api/v1/mounts/${mount.id}`, { method: 'DELETE' });
+      load();
+    } catch (err) {
+      setActionError((err as Error).message);
+    } finally {
+      setDeleting(null);
     }
   };
 
@@ -124,15 +167,26 @@ export default function MachinesPage() {
         </div>
       ) : null}
 
+      {actionError ? <div className="error">{actionError}</div> : null}
       {machines.length === 0 ? <div className="muted">还没有 agent 注册</div> : null}
       {machines.map((machine) => (
         <div className="panel" key={machine.id}>
-          <h2>
-            {machine.label ?? machine.machine_id}{' '}
-            <span className="muted">
-              ({machine.machine_id} · {machine.status})
-            </span>
-          </h2>
+          <div className="panel-header">
+            <h2>
+              {machine.label ?? machine.machine_id}{' '}
+              <span className="muted">
+                ({machine.machine_id} · {machine.status})
+              </span>
+            </h2>
+            <button
+              className="ghost danger"
+              type="button"
+              disabled={deleting === `machine-${machine.id}`}
+              onClick={() => void removeMachine(machine)}
+            >
+              {deleting === `machine-${machine.id}` ? '删除中…' : '删除机器'}
+            </button>
+          </div>
           <p className="muted">
             {machine.hostname ?? '-'} · {machine.platform ?? '-'}/{machine.arch ?? '-'} · agent{' '}
             {machine.agent_version ?? '-'} · 最后心跳 {formatRelative(machine.last_seen_at)}
@@ -147,6 +201,7 @@ export default function MachinesPage() {
                   <th>状态</th>
                   <th>覆盖率</th>
                   <th>清单版本</th>
+                  <th>操作</th>
                 </tr>
               </thead>
               <tbody>
@@ -177,6 +232,16 @@ export default function MachinesPage() {
                       )}
                     </td>
                     <td>{mount.manifest_epoch}</td>
+                    <td>
+                      <button
+                        className="ghost danger"
+                        type="button"
+                        disabled={deleting === `mount-${mount.id}`}
+                        onClick={() => void removeMount(machine, mount)}
+                      >
+                        {deleting === `mount-${mount.id}` ? '删除中…' : '删除'}
+                      </button>
+                    </td>
                   </tr>
                 ))}
               </tbody>

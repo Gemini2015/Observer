@@ -269,3 +269,23 @@ button:disabled {
   overflow: auto;
   max-height: 260px;
 }
+
+.panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.panel-header h2 {
+  margin: 0;
+}
+
+button.danger {
+  color: #f87171;
+  border-color: rgba(248, 113, 113, 0.4);
+}
+
+button.danger:hover {
+  background: rgba(248, 113, 113, 0.12);
+}
