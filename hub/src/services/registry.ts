@@ -227,3 +227,107 @@ export function getAgentByToken(db: Db, rawToken: string): AgentRow | undefined 
 export function getMachine(db: Db, machinePk: number): MachineRow | undefined {
   return db.prepare('SELECT * FROM machines WHERE id = ?').get(machinePk) as MachineRow | undefined;
 }
+
+export interface AgentIdentityMount {
+  id: number;
+  mount_id: string;
+  label: string | null;
+  physical_path: string;
+  sentinel: string | null;
+  fs_kind: string;
+  case_sensitive: string;
+  unicode: string;
+  include: string[];
+  exclude: string[];
+  rules_hash: string;
+  limits: Record<string, unknown>;
+  schedule: Record<string, unknown>;
+  repair_allowed: boolean;
+  state: string;
+}
+
+export interface AgentIdentity {
+  agent_id: number;
+  machine_id: string;
+  label: string | null;
+  hostname: string | null;
+  platform: string | null;
+  arch: string | null;
+  mounts: AgentIdentityMount[];
+}
+
+interface IdentityMountRow {
+  id: number;
+  mount_id: string;
+  label: string | null;
+  physical_path: string;
+  sentinel: string | null;
+  fs_kind: string;
+  case_sensitive: string;
+  unicode: string;
+  include_json: string;
+  exclude_json: string;
+  rules_hash: string;
+  limits_json: string;
+  schedule_json: string;
+  repair_allowed: number;
+  state: string;
+}
+
+function parseStringArray(value: string | null): string[] {
+  try {
+    const parsed = JSON.parse(value ?? '[]') as unknown;
+    return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === 'string') : [];
+  } catch {
+    return [];
+  }
+}
+
+function parseObject(value: string | null): Record<string, unknown> {
+  try {
+    const parsed = JSON.parse(value ?? '{}') as unknown;
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : {};
+  } catch {
+    return {};
+  }
+}
+
+/** 返回 token 所属机器的身份与挂载点配置，供 agent 重连/自动填充。 */
+export function getAgentIdentity(db: Db, agent: AgentRow): AgentIdentity | undefined {
+  const machine = getMachine(db, agent.machine_pk);
+  if (!machine) return undefined;
+
+  const rows = db
+    .prepare(
+      "SELECT id, mount_id, label, physical_path, sentinel, fs_kind, case_sensitive, unicode, include_json, exclude_json, rules_hash, limits_json, schedule_json, repair_allowed, state FROM mounts WHERE machine_pk = ? AND state != 'removed' ORDER BY mount_id",
+    )
+    .all(agent.machine_pk) as IdentityMountRow[];
+
+  return {
+    agent_id: agent.id,
+    machine_id: machine.machine_id,
+    label: machine.label,
+    hostname: machine.hostname,
+    platform: machine.platform,
+    arch: machine.arch,
+    mounts: rows.map((row) => ({
+      id: row.id,
+      mount_id: row.mount_id,
+      label: row.label,
+      physical_path: row.physical_path,
+      sentinel: row.sentinel,
+      fs_kind: row.fs_kind,
+      case_sensitive: row.case_sensitive,
+      unicode: row.unicode,
+      include: parseStringArray(row.include_json),
+      exclude: parseStringArray(row.exclude_json),
+      rules_hash: row.rules_hash,
+      limits: parseObject(row.limits_json),
+      schedule: parseObject(row.schedule_json),
+      repair_allowed: row.repair_allowed === 1,
+      state: row.state,
+    })),
+  };
+}

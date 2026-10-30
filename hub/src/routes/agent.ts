@@ -14,7 +14,7 @@ import {
   ResultBatchSchema,
   TransferFailSchema,
 } from '../http/schemas.js';
-import { enrollAgent, heartbeatAgent } from '../services/registry.js';
+import { enrollAgent, getAgentIdentity, heartbeatAgent } from '../services/registry.js';
 import { findUsableEnrollToken } from '../services/tokens.js';
 import {
   dispatchJobForAgent,
@@ -59,11 +59,17 @@ export function registerAgentRoutes(app: FastifyInstance, ctx: RouteContext): vo
     });
   });
 
+  app.get('/api/v1/agent/identity', async (request) => {
+    const agent = requireAgent(ctx.db, request);
+    const identity = getAgentIdentity(ctx.db, agent);
+    if (!identity) throw new HttpError(404, 'machine not found');
+    return identity;
+  });
+
   app.post('/api/v1/agent/heartbeat', async (request) => {
     const agent = requireAgent(ctx.db, request);
     const body = HeartbeatInput.parse(request.body ?? {});
     const base = heartbeatAgent(ctx.db, agent, body);
-
     const job = dispatchJobForAgent(ctx.db, agent);
     const mount = job ? getMount(ctx.db, job.mount_pk) : undefined;
 
