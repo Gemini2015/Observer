@@ -181,7 +181,12 @@ func assessConfig(path string) (*config.Config, SetupState) {
 	cfg, err := config.Load(path)
 	if err != nil {
 		state.NeedsSetup = true
-		state.Error = err.Error()
+		// 首次使用（文件不存在）不把系统错误显示在向导上。
+		if errors.Is(err, os.ErrNotExist) {
+			state.Error = ""
+		} else {
+			state.Error = err.Error()
+		}
 		return nil, state
 	}
 	if !isConfigured(cfg) {
@@ -234,7 +239,8 @@ func cleanExclude(values []string) []string {
 func validateSentinel(sentinel string) (string, error) {
 	sentinel = strings.TrimSpace(sentinel)
 	if sentinel == "" {
-		return ".observer-mount", nil
+		// 未配置 sentinel = 不启用挂载守卫（扫描整个目录）。
+		return "", nil
 	}
 	slashed := filepath.ToSlash(sentinel)
 	if strings.HasPrefix(slashed, "/") || strings.Contains(slashed, "..") {

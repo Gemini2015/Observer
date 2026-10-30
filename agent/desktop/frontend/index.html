@@ -51,7 +51,8 @@
           </div>
           <div id="setup-mounts" class="mount-list"></div>
           <p class="muted">
-            sentinel 是挂载目录里的守卫文件（内容需包含 mount id），用于避免磁盘未挂载时误报文件丢失。
+            sentinel 是可选守卫文件：留空表示直接扫描整个目录；填写后必须确保目录里存在该文件且内容包含 mount id，
+            否则该挂载点会被判定为不可用并跳过巡检。
           </p>
         </section>
 
@@ -161,6 +162,7 @@
           <div id="settings-mounts" class="mount-list"></div>
           <p class="muted">
             修改 path 只影响本机扫描，hub Web 显示的路径为注册快照；新增挂载点后请在 hub Web 触发一次基线巡检。
+            sentinel 留空表示不启用挂载守卫；填写后需确保目录中存在该文件。
             调度/限速/只读等高级配置请编辑 YAML；更换 hub/token/机器 ID 需要重新注册（删除配置文件后重启可重新进入首次配置向导）。
           </p>
 

@@ -43,6 +43,9 @@ func TestAssessConfig(t *testing.T) {
 	if !state.NeedsSetup || state.Existing {
 		t.Fatalf("missing config state = %+v", state)
 	}
+	if state.Error != "" {
+		t.Fatalf("missing config should not show raw error: %q", state.Error)
+	}
 
 	invalid := writeTestConfig(t, t.TempDir(), "agent: [broken")
 	_, state = assessConfig(invalid)
@@ -108,6 +111,20 @@ func TestValidateInitial(t *testing.T) {
 	}
 	if !strings.Contains(string(data), "state_dir:") {
 		t.Fatalf("expected state_dir in generated yaml: %s", data)
+	}
+
+	withoutSentinel := valid
+	withoutSentinel.Mounts = []SetupMountInput{{ID: "data", Path: mountDir}}
+	data, err = validateInitial(withoutSentinel)
+	if err != nil {
+		t.Fatalf("validateInitial without sentinel: %v", err)
+	}
+	cfg, err = config.Parse(data)
+	if err != nil {
+		t.Fatalf("config without sentinel invalid: %v", err)
+	}
+	if cfg.Mounts[0].Sentinel != "" {
+		t.Fatalf("sentinel should be optional, got %q", cfg.Mounts[0].Sentinel)
 	}
 
 	cases := []struct {

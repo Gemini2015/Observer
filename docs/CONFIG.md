@@ -78,6 +78,7 @@ mounts:                       # 必填：至少一个
   ```
   agent 每轮巡检前检查该文件：**不存在或内容不含 mount ID** 时，认为挂载点不可用，跳过整轮巡检并**不产生 missing 误报**。
   用途：防止磁盘/网络盘未挂载、挂错盘或目录被清空时，把「文件消失」误判成大量文件丢失。
+  **留空 = 不启用挂载守卫**（直接扫描整个目录）；GUI 配置向导默认留空，需要该保护时再填写并创建文件。
 - **read_only**：声明用途，配合 `repair_allowed: false` 使用；修复源端读取不受影响。
 - **token 与状态目录**：`agent.token`（内联）优先于 `token_file`，内联时不需要 token 文件。
   - `agent.token` 填 hub Web 生成的**一次性注册 token**；首次启动会向 hub 换取长期 agent token，并缓存到 `<state_dir>/agent.token`，之后启动直接使用缓存。

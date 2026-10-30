@@ -179,7 +179,7 @@ function buildMountRow(mount, options, rerender) {
   sentinel.addEventListener("input", () => {
     mount.sentinel = sentinel.value;
   });
-  grid.append(makeField("sentinel（守卫文件）", sentinel));
+  grid.append(makeField("sentinel（可选）", sentinel));
 
   const pathInput = makeInput("例如 D:\\ObserverData");
   pathInput.value = mount.path ?? "";
@@ -269,7 +269,7 @@ function showSetup(state) {
           const value = mountToInput(mount);
           return value;
         })
-      : [{ id: "data", label: "", path: "", sentinel: ".observer-mount", exclude: [], repair_allowed: false }];
+      : [{ id: "data", label: "", path: "", sentinel: "", exclude: [], repair_allowed: false }];
   renderMounts($("setup-mounts"), setupMounts, { idEditable: true });
 }
 
@@ -332,7 +332,7 @@ document.addEventListener("DOMContentLoaded", () => {
     openHub($("setup-hub").value.trim() || "http://127.0.0.1:8787");
   });
   $("setup-add-mount").addEventListener("click", () => {
-    setupMounts.push({ id: "", label: "", path: "", sentinel: ".observer-mount", exclude: [], repair_allowed: false });
+    setupMounts.push({ id: "", label: "", path: "", sentinel: "", exclude: [], repair_allowed: false });
     renderMounts($("setup-mounts"), setupMounts, { idEditable: true });
   });
   $("setup-save").addEventListener("click", async () => {
@@ -351,7 +351,7 @@ document.addEventListener("DOMContentLoaded", () => {
   $("nav-status").addEventListener("click", () => switchTab("status"));
   $("nav-settings").addEventListener("click", () => switchTab("settings"));
   $("settings-add-mount").addEventListener("click", () => {
-    settingsMounts.push({ id: "", label: "", path: "", sentinel: ".observer-mount", exclude: [], repair_allowed: false, isNew: true });
+    settingsMounts.push({ id: "", label: "", path: "", sentinel: "", exclude: [], repair_allowed: false, isNew: true });
     renderMounts($("settings-mounts"), settingsMounts, { idEditable: false });
   });
   $("settings-save").addEventListener("click", async () => {
