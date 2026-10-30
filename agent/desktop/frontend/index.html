@@ -34,13 +34,14 @@
               <input id="setup-hub" placeholder="http://127.0.0.1:8787" autocomplete="off" />
             </label>
             <label class="field">
-              <span>注册 token</span>
-              <input id="setup-token" placeholder="hub Web → 机器与挂载点 → 注册新机器" autocomplete="off" />
+              <span>注册 token / 接入 token</span>
+              <input id="setup-token" placeholder="新节点：注册 token；已有节点：机器页获取接入 token" autocomplete="off" />
             </label>
           </div>
           <div class="toolbar">
             <button id="setup-open-hub" class="ghost" type="button">打开 hub Web 获取 token</button>
-            <span class="muted">token 只显示一次，粘贴后保存即可自动注册。</span>
+            <button id="setup-probe" class="ghost" type="button">识别已有节点</button>
+            <span id="setup-probe-status" class="muted">已有节点：粘贴接入 token 后点识别，自动填充机器与挂载点。</span>
           </div>
         </section>
 

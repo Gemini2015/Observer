@@ -1,7 +1,10 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -285,6 +288,75 @@ func TestWriteConfigFile(t *testing.T) {
 	data, _ = os.ReadFile(path)
 	if string(data) != "second: 2\n" {
 		t.Fatalf("current = %q", data)
+	}
+}
+
+func TestProbeExistingNode(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Path != "/api/v1/agent/identity" {
+			writer.WriteHeader(http.StatusNotFound)
+			return
+		}
+		if request.Header.Get("Authorization") != "Bearer access-token" {
+			writer.Header().Set("Content-Type", "application/json")
+			writer.WriteHeader(http.StatusUnauthorized)
+			_ = json.NewEncoder(writer).Encode(map[string]any{
+				"title": "unauthorized", "status": 401,
+			})
+			return
+		}
+		writer.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(writer).Encode(map[string]any{
+			"agent_id":   3,
+			"machine_id": "existing-pc",
+			"label":      "Existing PC",
+			"hostname":   "EXISTING-PC",
+			"platform":   "windows",
+			"arch":       "amd64",
+			"mounts": []map[string]any{
+				{
+					"mount_id":       "ui_data",
+					"label":          "UI",
+					"physical_path":  "E:\\UI",
+					"sentinel":       "",
+					"fs_kind":        "local",
+					"case_sensitive": "auto",
+					"unicode":        "auto",
+					"include":        []string{},
+					"exclude":        []string{"**/.observer-mount"},
+					"rules_hash":     "rules-1",
+					"limits":         map[string]any{},
+					"schedule":       map[string]any{},
+					"repair_allowed": true,
+					"state":          "active",
+				},
+			},
+		})
+	}))
+	defer server.Close()
+
+	service := &ConfigService{}
+	result, err := service.ProbeExistingNode(ProbeInput{Hub: server.URL, Token: "access-token"})
+	if err != nil {
+		t.Fatalf("ProbeExistingNode: %v", err)
+	}
+	if result.MachineID != "existing-pc" || result.Label != "Existing PC" || len(result.Mounts) != 1 {
+		t.Fatalf("unexpected result: %+v", result)
+	}
+	mount := result.Mounts[0]
+	if mount.ID != "ui_data" || mount.Path != "E:\\UI" || !mount.RepairAllowed {
+		t.Fatalf("unexpected mount: %+v", mount)
+	}
+	if len(mount.Exclude) != 1 || mount.Exclude[0] != "**/.observer-mount" {
+		t.Fatalf("unexpected exclude: %+v", mount.Exclude)
+	}
+
+	if _, err := service.ProbeExistingNode(ProbeInput{Hub: server.URL, Token: "bad-token"}); err == nil ||
+		!strings.Contains(err.Error(), "无效或已失效") {
+		t.Fatalf("expected unauthorized error, got %v", err)
+	}
+	if _, err := service.ProbeExistingNode(ProbeInput{Hub: "ftp://x", Token: "access-token"}); err == nil {
+		t.Fatal("expected invalid hub error")
 	}
 }
 

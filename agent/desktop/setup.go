@@ -222,6 +222,15 @@ func prefillFromConfig(cfg *config.Config) *SetupInput {
 
 var defaultExclude = []string{"**/.observer-mount", "**/.observer-quarantine/**"}
 
+func validateHubURL(raw string) (string, error) {
+	hub := strings.TrimSpace(raw)
+	parsed, err := url.Parse(hub)
+	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") {
+		return "", errors.New("hub 地址必须是 http(s) URL")
+	}
+	return hub, nil
+}
+
 func cleanExclude(values []string) []string {
 	cleaned := make([]string, 0, len(values))
 	for _, value := range values {
@@ -270,10 +279,9 @@ func validateInitial(input SetupInput) ([]byte, error) {
 	if !machineIDPattern.MatchString(machineID) {
 		return nil, fmt.Errorf("机器 ID 必须匹配 %s", machineIDPattern)
 	}
-	hub := strings.TrimSpace(input.Hub)
-	parsed, err := url.Parse(hub)
-	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") {
-		return nil, errors.New("hub 地址必须是 http(s) URL")
+	hub, err := validateHubURL(input.Hub)
+	if err != nil {
+		return nil, err
 	}
 	token := strings.TrimSpace(input.Token)
 	if isPlaceholderToken(token) {

@@ -250,6 +250,8 @@ function showSetup(state) {
   $("setup-path").textContent = state.config_path || "-";
   const defaults = state.defaults ?? {};
   const prefill = state.prefill ?? {};
+  $("setup-machine-id").readOnly = false;
+  $("setup-probe-status").textContent = "已有节点：粘贴接入 token 后点识别，自动填充机器与挂载点。";
   $("setup-machine-id").value = prefill.machine_id || defaults.machine_id || "";
   $("setup-label").value = prefill.label || defaults.label || "";
   $("setup-hub").value = prefill.hub || defaults.hub || "http://127.0.0.1:8787";
@@ -331,6 +333,37 @@ document.addEventListener("DOMContentLoaded", () => {
   $("setup-open-hub").addEventListener("click", () => {
     openHub($("setup-hub").value.trim() || "http://127.0.0.1:8787");
   });
+
+  const unlockProbe = () => {
+    $("setup-machine-id").readOnly = false;
+    $("setup-probe-status").textContent =
+      "已有节点：粘贴接入 token 后点识别，自动填充机器与挂载点。";
+  };
+  $("setup-hub").addEventListener("input", unlockProbe);
+  $("setup-token").addEventListener("input", unlockProbe);
+
+  $("setup-probe").addEventListener("click", async () => {
+    const status = $("setup-probe-status");
+    status.textContent = "识别中…";
+    try {
+      const result = await ConfigService.ProbeExistingNode({
+        hub: $("setup-hub").value.trim(),
+        token: $("setup-token").value.trim(),
+      });
+      $("setup-machine-id").value = result.machine_id || "";
+      $("setup-machine-id").readOnly = true;
+      if (result.label) {
+        $("setup-label").value = result.label;
+      }
+      setupMounts = (result.mounts ?? []).map((mount) => mountToInput(mount));
+      renderMounts($("setup-mounts"), setupMounts, { idEditable: true });
+      status.textContent = `已识别节点 ${result.machine_id}（${setupMounts.length} 个挂载点），确认目录后保存`;
+      hide($("setup-error"));
+    } catch (error) {
+      status.textContent = error?.message || String(error);
+    }
+  });
+
   $("setup-add-mount").addEventListener("click", () => {
     setupMounts.push({ id: "", label: "", path: "", sentinel: "", exclude: [], repair_allowed: false });
     renderMounts($("setup-mounts"), setupMounts, { idEditable: true });
