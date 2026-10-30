@@ -449,7 +449,12 @@ export default function FilesPage() {
                     <td>{formatBytes(item.size)}</td>
                     <td>{formatTime(item.last_seen_at)}</td>
                     <td>{formatTime(item.last_hashed_at)}</td>
-                    <td className="file-path">{item.content_hash ? item.content_hash.slice(0, 12) : '-'}</td>
+                    <td
+                      className="file-path"
+                      title={item.content_hash ?? undefined}
+                    >
+                      {item.content_hash ? `${item.content_hash.slice(0, 12)}…` : '-'}
+                    </td>
                     <td>{item.open_issue_count > 0 ? item.open_issue_count : '-'}</td>
                   </tr>
                 ))}

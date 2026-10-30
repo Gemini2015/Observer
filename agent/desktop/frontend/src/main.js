@@ -465,15 +465,16 @@ function renderFiles(result) {
       fileStateLabel(item.state),
       formatBytes(item.size),
       formatTime(item.last_seen_at),
-      item.content_hash ? item.content_hash.slice(0, 12) : "-",
+      item.content_hash ? `${item.content_hash.slice(0, 12)}…` : "-",
       item.open_issue_count > 0 ? String(item.open_issue_count) : "-",
     ];
-    for (const value of cells) {
+    cells.forEach((value, index) => {
       const cell = document.createElement("td");
       cell.textContent = value;
-      if (value === path) cell.className = "file-path";
+      if (index === 0) cell.className = "file-path";
+      if (index === 5 && item.content_hash) cell.title = item.content_hash;
       row.appendChild(cell);
-    }
+    });
     row.addEventListener("click", () => {
       void toggleFileDetail(item.id);
     });
