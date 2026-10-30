@@ -42,6 +42,19 @@ header {
   margin-bottom: 18px;
 }
 
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.brand-icon {
+  width: 30px;
+  height: 30px;
+  flex: none;
+  display: block;
+}
+
 h1 {
   font-size: 20px;
   margin: 0;

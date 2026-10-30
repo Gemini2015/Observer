@@ -26,7 +26,7 @@ import (
 //go:embed all:frontend/dist
 var assets embed.FS
 
-//go:embed build/appicon.png
+//go:embed build/trayicon.png
 var trayIcon []byte
 
 // RunSummary 是前端展示的一轮巡检统计。
