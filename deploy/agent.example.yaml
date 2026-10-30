@@ -1,16 +1,32 @@
 # Observer agent 示例配置（NAS / Linux）
-# 安装到 /etc/observer/agent.yaml，状态目录 /var/lib/observer 可写。
+# 安装到 /etc/observer/agent.yaml；状态目录（默认 /var/lib/observer）需可写。
 agent:
   machine_id: nas-01
   label: NAS
   hub: https://observer.example.com
+
+  # 二选一：
+  # 1) 内联 token（hub Web「注册新机器」生成的一次性 token；首次启动自动换取并缓存，
+  #    无需用户管理 token 文件。重新注册需删除 state_dir/agent.token）
+  # token: "<paste-token>"
+  # 2) token 文件（服务/容器常用；文件权限建议 0600，属主为运行用户）
   token_file: /var/lib/observer/token
+
+  # 可选：缓存与 spool 目录；不填时默认 token_file 所在目录，
+  # 内联 token 时默认 .observer/<machine_id>。
+  # state_dir: /var/lib/observer
 
 mounts:
   - id: photos
     label: 照片
     path: /media/photos
+
+    # 挂载守卫文件（相对 mount 根目录）：文件内容必须包含 mount ID，
+    # 例如内容为 "mount_id=photos"。文件缺失/内容不符时，agent 会认为
+    # 该盘未挂载（或挂错盘），跳过巡检且不产生 missing 误报。
+    # 创建方式：echo "mount_id=photos" > /media/photos/.observer-mount
     sentinel: .observer-mount
+
     fs_kind: local
     read_only: true
     repair_allowed: false

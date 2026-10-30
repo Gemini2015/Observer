@@ -56,16 +56,14 @@ pnpm --filter web dev
 
 环境变量见 [CONFIG §1](CONFIG.md#1-hub-环境变量)；生产环境必须显式设置 `OBSERVER_ADMIN_PASSWORD`。
 
-## 4. 创建注册 token
+## 4. 创建注册 token（Web 控制台）
 
-```powershell
-pnpm --filter hub token:create -- --machine nas-01
-```
+1. 打开 hub 控制台 <http://127.0.0.1:8787> 并登录；
+2. 进入「机器与挂载点」→ 点击「注册新机器」；
+3. 可选填机器 ID 提示与有效期，点击「生成 token」；
+4. **复制 token（只显示一次）**，填入 agent 配置的 `agent.token`。
 
-- `--machine` 是机器 ID 提示，agent 实际以配置里的 `agent.machine_id` 注册。
-- `--ttl-hours <n>` 可改有效期（默认 24 小时）。
-- 数据库默认在 `hub/data/observer.db`（`pnpm --filter hub` 的工作目录是 `hub/`；`OBSERVER_DATA_DIR` 可覆盖）。
-- token 一次性使用，CLI 会打印有效期与数据库路径。
+> 自动化/脚本仍可用 CLI：`pnpm --filter hub token:create -- --machine nas-01`（`--ttl-hours` 可改有效期）。
 
 ## 5. 启动 agent
 
@@ -75,27 +73,33 @@ pnpm --filter hub token:create -- --machine nas-01
 agent:
   machine_id: nas-01
   hub: http://127.0.0.1:8787
-  token_file: .observer/token
+  # 直接把 Web 生成的 token 填这里；无需 token 文件
+  token: "<粘贴上一步生成的 token>"
+  # 缓存/spool 目录；不填时默认 .observer/<machine_id>
+  state_dir: .observer/nas-01
 
 mounts:
   - id: photos
     label: 照片
     path: E:\photos
+    # 挂载守卫：文件内容需包含 mount id（如 mount_id=photos）；
+    # 缺失时跳过巡检且不产生 missing 误报，防止磁盘未挂载/挂错盘。
     sentinel: .observer-mount
     exclude:
       - "**/.observer-mount"
 ```
 
-构建与运行：
+构建与运行（内联 token 时不再需要 `OBSERVER_ENROLL_TOKEN`；首次启动自动注册）：
 
 ```powershell
 cd agent
 go build -o bin/observer-agent.exe ./cmd/observer-agent
-
-$env:OBSERVER_ENROLL_TOKEN = '<上一步的 token>'
 .\bin\observer-agent.exe run -config observer-agent.yaml
-# 也可以：.\bin\observer-agent.exe run -config ... -enroll-token <token>
 ```
+
+> 首次启动后，长期 agent token 会缓存到 `state_dir/agent.token`（默认 `.observer/<machine_id>/agent.token`），后续启动直接使用；重新注册请删除该目录。
+
+> 也可以使用 token 文件（NAS/服务常用）：配置 `token_file: /var/lib/observer/token`，首次运行设置 `OBSERVER_ENROLL_TOKEN` 完成注册，之后自动从文件读取。
 
 常用命令：
 
@@ -106,7 +110,7 @@ $env:OBSERVER_ENROLL_TOKEN = '<上一步的 token>'
 | `observer-agent doctor -config <path>` | 自检：配置、目录、sentinel、hub 连通性 |
 | `observer-agent version` | 版本 |
 
-> `token_file` 所在目录同时保存 `state.db`（缓存）与 `spool.jsonl`（离线补发）。**同一台机器跑多个 agent 时必须使用不同目录**（不同 `token_file` 路径）。
+> `token` 填 Web 生成的**一次性注册 token**：首次启动 agent 会自动换取长期 token，并缓存到 `state_dir/agent.token`（之后不再使用配置里的 token）。需要重新注册时删除 `state_dir`。**同一台机器跑多个 agent 时，不同 `machine_id` 会自动隔离状态目录**，无需再手工准备 token 文件。
 
 ## 6. 桌面客户端（Windows 先行）
 
@@ -114,10 +118,12 @@ $env:OBSERVER_ENROLL_TOKEN = '<上一步的 token>'
 go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0
 cd agent/desktop
 wails3 build
-.\bin\observer-agent-desktop.exe -config ..\observer-agent.yaml
+.\bin\observer-agent-desktop.exe
 ```
 
-- 关闭窗口隐藏到托盘，巡检继续；单实例；托盘菜单可暂停/打开 hub/开机启动。
+- 不传 `-config` 时，默认读取 **exe 同级目录下的 `agent.yaml`**；也可显式指定：`-config D:\Observer\agent.yaml`。
+- 启动时会把工作目录切到配置文件所在目录，配置里的相对路径（`state_dir`、`mounts[].path`）都相对该目录解析。
+- 关闭窗口隐藏到托盘，巡检继续；单实例；托盘菜单可暂停/打开 hub/开机启动（自启会携带当前配置的绝对路径）。
 - macOS 构建、签名与公证见 [DEPLOY §5](DEPLOY.md#5-macos)。
 
 ## 7. 常用命令
