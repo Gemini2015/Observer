@@ -56,7 +56,9 @@ pnpm --filter web dev
 
 环境变量见 [CONFIG §1](CONFIG.md#1-hub-环境变量)；生产环境必须显式设置 `OBSERVER_ADMIN_PASSWORD`。
 
-## 4. 创建注册 token（Web 控制台）
+## 4. 创建 token（Web 控制台）
+
+### 4.1 新节点：注册 token（一次性）
 
 1. 打开 hub 控制台 <http://127.0.0.1:8787> 并登录；
 2. 进入「机器与挂载点」→ 点击「注册新机器」；
@@ -64,6 +66,17 @@ pnpm --filter web dev
 4. **复制 token（只显示一次）**，填入 agent 配置的 `agent.token`。
 
 > 自动化/脚本仍可用 CLI：`pnpm --filter hub token:create -- --machine nas-01`（`--ttl-hours` 可改有效期）。
+
+### 4.2 已有节点：接入 token（长期、可重新生成）
+
+本地 yaml/token 丢失、或想把新装的 agent 接到已有节点时，不需要删除节点重新注册：
+
+1. 「机器与挂载点」→ 找到已注册机器 → 点「获取接入 token」；
+2. 确认轮换（**旧 token 立即失效**，旧 agent 会掉线）→ 复制新 token（只显示一次）；
+3. agent 配置的 `agent.token` 填这个接入 token（或 GUI 首次向导里粘贴）；
+4. GUI 首次向导可点「识别已有节点」，自动填充该节点的 machine_id 与已有挂载点配置，确认目录后保存即可回到原节点，历史任务/覆盖率保留。
+
+> 接入 token 是长期凭据，可反复使用；每次「获取接入 token」都会轮换，不能查看旧明文。
 
 ## 5. 启动 agent
 
@@ -73,7 +86,7 @@ pnpm --filter web dev
 agent:
   machine_id: nas-01
   hub: http://127.0.0.1:8787
-  # 直接把 Web 生成的 token 填这里；无需 token 文件
+  # 新节点：注册 token（一次性）；已有节点：接入 token（长期）
   token: "<粘贴上一步生成的 token>"
   # 缓存/spool 目录；不填时默认 .observer/<machine_id>
   state_dir: .observer/nas-01
@@ -97,7 +110,7 @@ go build -o bin/observer-agent.exe ./cmd/observer-agent
 .\bin\observer-agent.exe run -config observer-agent.yaml
 ```
 
-> 首次启动后，长期 agent token 会缓存到 `state_dir/agent.token`（默认 `.observer/<machine_id>/agent.token`），后续启动直接使用；重新注册请删除该目录。
+> 首次启动后，长期 agent token 会缓存到 `state_dir/agent.token`（默认 `.observer/<machine_id>/agent.token`），后续启动会先校验缓存；如果 token 已在 hub 重新生成，旧缓存会失效并自动改用配置里的新 token。`agent.machine_id` 必须与 token 所属节点一致。
 
 > 也可以使用 token 文件（NAS/服务常用）：配置 `token_file: /var/lib/observer/token`，首次运行设置 `OBSERVER_ENROLL_TOKEN` 完成注册，之后自动从文件读取。
 
@@ -110,7 +123,7 @@ go build -o bin/observer-agent.exe ./cmd/observer-agent
 | `observer-agent doctor -config <path>` | 自检：配置、目录、sentinel、hub 连通性 |
 | `observer-agent version` | 版本 |
 
-> `token` 填 Web 生成的**一次性注册 token**：首次启动 agent 会自动换取长期 token，并缓存到 `state_dir/agent.token`（之后不再使用配置里的 token）。需要重新注册时删除 `state_dir`。**同一台机器跑多个 agent 时，不同 `machine_id` 会自动隔离状态目录**，无需再手工准备 token 文件。
+> `token` 可以填两种值：**新节点**用 Web「注册新机器」生成的一次性注册 token（首次启动自动换取长期 token 并缓存）；**已有节点**用机器行「获取接入 token」生成的长期 token（直接校验使用，可反复使用，重新生成后旧 token 失效）。同一台机器跑多个 agent 时，不同 `machine_id` 会自动隔离状态目录。
 
 ## 6. 桌面客户端（Windows 先行）
 
@@ -121,7 +134,7 @@ wails3 build
 .\bin\observer-agent-desktop.exe
 ```
 
-- **首次启动**：没有 `agent.yaml` / 配置未完成时会直接进入 GUI 配置向导（机器 ID、hub、注册 token、挂载点），点击「保存并启动」后自动生成 exe 同级 `agent.yaml` 并开始巡检。
+- **首次启动**：没有 `agent.yaml` / 配置未完成时会直接进入 GUI 配置向导（机器 ID、hub、注册 token/接入 token、挂载点）。新节点用一次性注册 token；已有节点用机器行「获取接入 token」，粘贴后点「识别已有节点」自动填充 machine_id 与挂载点，保存后回到原节点。
 - 主界面「设置」页可修改显示名称与挂载点的显示名/目录/sentinel/排除规则/修复开关，可新增/删除挂载点；新增挂载点后需在 hub Web 触发一次基线巡检。删除为软删除（hub 保留历史数据）。
 - 机器 ID/hub/token/状态目录为只读；调度、限速、只读等高级配置仍编辑 YAML（设置保存不会丢失这些字段）。
 - 不传 `-config` 时默认读取 exe 同级 `agent.yaml`；也可显式指定：`-config D:\Observer\agent.yaml`。

@@ -81,8 +81,11 @@ mounts:                       # 必填：至少一个
   **留空 = 不启用挂载守卫**（直接扫描整个目录）；GUI 配置向导默认留空，需要该保护时再填写并创建文件。
 - **read_only**：声明用途，配合 `repair_allowed: false` 使用；修复源端读取不受影响。
 - **token 与状态目录**：`agent.token`（内联）优先于 `token_file`，内联时不需要 token 文件。
-  - `agent.token` 填 hub Web 生成的**一次性注册 token**；首次启动会向 hub 换取长期 agent token，并缓存到 `<state_dir>/agent.token`，之后启动直接使用缓存。
-  - 如需重新注册（例如 token 泄漏或换机器），删除 `state_dir` 目录（或其中的 `agent.token`）后重启。
+  - `agent.token` 支持两种值：
+    - **注册 token**（一次性，Web「注册新机器」生成）：新节点首次启动向 hub 换取长期 agent token，并缓存到 `<state_dir>/agent.token`；
+    - **接入 token**（长期，Web 机器行「获取接入 token」生成）：直接用于认证，可反复使用；重新生成会轮换旧 token。
+  - 启动时会先校验缓存 token；若已被 hub 撤销/轮换，会忽略缓存并尝试配置里的新 token。`agent.machine_id` 必须与 token 所属节点一致。
+  - 本地 yaml/token 丢失但节点仍存在时，不需要删除节点：在 hub 机器行重新获取接入 token，agent 配置填该 token 即可回到原节点；GUI 首次向导可用「识别已有节点」自动填充 machine_id 与挂载点。
   - `state_dir` 默认：有 `token_file` 时为 token 文件所在目录；否则为 `.observer/<machine_id>`，其中保存 `state.db`（bbolt 缓存）、`spool.jsonl`（离线补发）与 `agent.token`。
   - 同一台机器跑多个 agent 时，用不同的 `machine_id` 即自动隔离；也可显式配置 `state_dir`。
 
