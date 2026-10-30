@@ -40,6 +40,12 @@ export const ScanRequest = z.object({
   mode: z.enum(['baseline', 'incremental', 'full']).default('incremental'),
 });
 
+export const BulkScanRequest = z.object({
+  mode: z.enum(['incremental', 'full']),
+  machine_pk: z.coerce.number().int().positive().optional(),
+  mount_pk: z.coerce.number().int().positive().optional(),
+});
+
 export const ResultEntrySchema = z.object({
   path_key: z.string().min(1).max(4096),
   path_display_b64: z.string().min(1),
