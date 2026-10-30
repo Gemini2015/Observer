@@ -8,72 +8,173 @@
   </head>
   <body>
     <div class="app">
-      <header>
-        <h1>Observer Agent</h1>
-        <span id="conn" class="badge">连接中</span>
-      </header>
+      <div id="setup-view" class="hidden">
+        <header>
+          <h1>Observer Agent</h1>
+          <span class="badge warn">首次配置</span>
+        </header>
+        <p class="muted">
+          配置文件：<span id="setup-path">-</span>
+        </p>
+        <div id="setup-error" class="error hidden"></div>
 
-      <section class="cards">
-        <div class="card">
-          <div class="label">机器</div>
-          <div id="machine" class="value">-</div>
+        <section class="card">
+          <h2>连接</h2>
+          <div class="form-grid">
+            <label class="field">
+              <span>机器 ID</span>
+              <input id="setup-machine-id" placeholder="例如 win-01" autocomplete="off" />
+            </label>
+            <label class="field">
+              <span>显示名称</span>
+              <input id="setup-label" placeholder="可选" autocomplete="off" />
+            </label>
+            <label class="field">
+              <span>hub 地址</span>
+              <input id="setup-hub" placeholder="http://127.0.0.1:8787" autocomplete="off" />
+            </label>
+            <label class="field">
+              <span>注册 token</span>
+              <input id="setup-token" placeholder="hub Web → 机器与挂载点 → 注册新机器" autocomplete="off" />
+            </label>
+          </div>
+          <div class="toolbar">
+            <button id="setup-open-hub" class="ghost" type="button">打开 hub Web 获取 token</button>
+            <span class="muted">token 只显示一次，粘贴后保存即可自动注册。</span>
+          </div>
+        </section>
+
+        <section class="card">
+          <div class="toolbar" style="justify-content: space-between">
+            <h2>挂载点</h2>
+            <button id="setup-add-mount" class="ghost" type="button">新增挂载点</button>
+          </div>
+          <div id="setup-mounts" class="mount-list"></div>
+          <p class="muted">
+            sentinel 是挂载目录里的守卫文件（内容需包含 mount id），用于避免磁盘未挂载时误报文件丢失。
+          </p>
+        </section>
+
+        <div class="toolbar">
+          <button id="setup-save" class="primary" type="button">保存并启动</button>
+          <span id="setup-status" class="muted"></span>
         </div>
-        <div class="card">
-          <div class="label">巡检状态</div>
-          <div id="state" class="value">-</div>
+      </div>
+
+      <div id="main-view" class="hidden">
+        <header>
+          <h1>Observer Agent</h1>
+          <nav class="nav">
+            <button id="nav-status" class="nav-btn active" type="button">状态</button>
+            <button id="nav-settings" class="nav-btn" type="button">设置</button>
+          </nav>
+          <span id="conn" class="badge">连接中</span>
+        </header>
+
+        <div id="status-view">
+          <section class="cards">
+            <div class="card">
+              <div class="label">机器</div>
+              <div id="machine" class="value">-</div>
+            </div>
+            <div class="card">
+              <div class="label">巡检状态</div>
+              <div id="state" class="value">-</div>
+            </div>
+            <div class="card">
+              <div class="label">hub</div>
+              <div id="hub" class="value small">-</div>
+            </div>
+            <div class="card">
+              <div class="label">最近同步</div>
+              <div id="last-run" class="value small">尚未同步</div>
+            </div>
+          </section>
+
+          <section class="card hidden" id="current-card">
+            <h2>当前任务</h2>
+            <div id="current-title" class="current-title">-</div>
+            <div class="progress"><span></span></div>
+            <div id="current-detail" class="muted">-</div>
+          </section>
+
+          <section class="card">
+            <h2>最近一轮统计</h2>
+            <div id="stats" class="stats">暂无</div>
+          </section>
+
+          <section class="card">
+            <h2>最近任务</h2>
+            <table class="jobs">
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>挂载点</th>
+                  <th>模式</th>
+                  <th>状态</th>
+                  <th>开始</th>
+                  <th>结果</th>
+                </tr>
+              </thead>
+              <tbody id="jobs">
+                <tr>
+                  <td colspan="6" class="muted">暂无任务</td>
+                </tr>
+              </tbody>
+            </table>
+          </section>
+
+          <section class="card">
+            <h2>最近错误</h2>
+            <div id="error" class="error">无</div>
+          </section>
         </div>
-        <div class="card">
-          <div class="label">hub</div>
-          <div id="hub" class="value small">-</div>
+
+        <div id="settings-view" class="hidden">
+          <h2>设置</h2>
+          <p class="muted">
+            配置路径：<span id="settings-path">-</span>
+          </p>
+          <div class="form-grid">
+            <label class="field">
+              <span>机器 ID（只读）</span>
+              <input id="settings-machine-id" disabled />
+            </label>
+            <label class="field">
+              <span>hub 地址（只读）</span>
+              <input id="settings-hub" disabled />
+            </label>
+            <label class="field">
+              <span>状态目录（只读）</span>
+              <input id="settings-state-dir" disabled />
+            </label>
+            <label class="field">
+              <span>显示名称</span>
+              <input id="settings-label" placeholder="可选" autocomplete="off" />
+            </label>
+          </div>
+
+          <div class="toolbar" style="justify-content: space-between">
+            <h2>挂载点</h2>
+            <button id="settings-add-mount" class="ghost" type="button">新增挂载点</button>
+          </div>
+          <div id="settings-mounts" class="mount-list"></div>
+          <p class="muted">
+            修改 path 只影响本机扫描，hub Web 显示的路径为注册快照；新增挂载点后请在 hub Web 触发一次基线巡检。
+            调度/限速/只读等高级配置请编辑 YAML；更换 hub/token/机器 ID 需要重新注册（删除配置文件后重启可重新进入首次配置向导）。
+          </p>
+
+          <div class="toolbar">
+            <button id="settings-save" class="primary" type="button">保存设置</button>
+            <span id="settings-status" class="muted"></span>
+          </div>
         </div>
-        <div class="card">
-          <div class="label">最近同步</div>
-          <div id="last-run" class="value small">尚未同步</div>
-        </div>
-      </section>
 
-      <section class="card hidden" id="current-card">
-        <h2>当前任务</h2>
-        <div id="current-title" class="current-title">-</div>
-        <div class="progress"><span></span></div>
-        <div id="current-detail" class="muted">-</div>
-      </section>
-
-      <section class="card">
-        <h2>最近一轮统计</h2>
-        <div id="stats" class="stats">暂无</div>
-      </section>
-
-      <section class="card">
-        <h2>最近任务</h2>
-        <table class="jobs">
-          <thead>
-            <tr>
-              <th>#</th>
-              <th>挂载点</th>
-              <th>模式</th>
-              <th>状态</th>
-              <th>开始</th>
-              <th>结果</th>
-            </tr>
-          </thead>
-          <tbody id="jobs">
-            <tr>
-              <td colspan="6" class="muted">暂无任务</td>
-            </tr>
-          </tbody>
-        </table>
-      </section>
-
-      <section class="card">
-        <h2>最近错误</h2>
-        <div id="error" class="error">无</div>
-      </section>
-
-      <footer>
-        <button id="open-hub" class="ghost" type="button">打开 hub Web</button>
-        <span class="muted">关闭窗口会隐藏到托盘，巡检继续</span>
-      </footer>
+        <footer>
+          <button id="open-hub" class="ghost" type="button">打开 hub Web</button>
+          <span class="muted">关闭窗口会隐藏到托盘，巡检继续</span>
+        </footer>
+      </div>
     </div>
     <script type="module" src="/src/main.js"></script>
   </body>

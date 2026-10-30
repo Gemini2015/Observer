@@ -63,10 +63,18 @@ type controller struct {
 	app    *application.App
 	window *application.WebviewWindow
 	paused bool
+
+	configPath    string
+	setup         SetupState
+	appCtx        context.Context
+	runnerCancel  context.CancelFunc
+	runnerDone    chan struct{}
+	runnerStarted bool
 }
 
 func init() {
 	application.RegisterEvent[Status]("status")
+	application.RegisterEvent[SetupState]("setup")
 }
 
 func main() {
@@ -87,26 +95,38 @@ func main() {
 	}
 	// 让配置中的相对路径（token_file/state_dir/mounts）相对配置文件目录解析。
 	if err := os.Chdir(filepath.Dir(absoluteConfig)); err != nil {
-		log.Fatalf("切换工作目录失败: %v", err)
+		log.Printf("切换配置目录失败（将使用当前目录）: %v", err)
 	}
 
-	cfg, err := config.Load(absoluteConfig)
-	if err != nil {
-		log.Fatalf("加载配置失败: %v", err)
-	}
+	cfg, setupState := assessConfig(absoluteConfig)
 
 	c := &controller{
-		cfg:    cfg,
-		status: Status{MachineID: cfg.Agent.MachineID, Hub: cfg.Agent.Hub},
+		cfg:        cfg,
+		configPath: absoluteConfig,
+		setup:      setupState,
+	}
+	if cfg != nil {
+		c.status = Status{MachineID: cfg.Agent.MachineID, Hub: cfg.Agent.Hub}
 	}
 
 	var cancel context.CancelFunc
+
+	windowTitle := "Observer Agent"
+	if setupState.NeedsSetup {
+		windowTitle = "Observer Agent（首次配置）"
+	}
 
 	app := application.New(application.Options{
 		Name:        "Observer Agent",
 		Description: "Observer 文件完整性巡检客户端",
 		Assets: application.AssetOptions{
 			Handler: application.AssetFileServerFS(assets),
+		},
+		Services: []application.Service{
+			application.NewService(&ConfigService{
+				controller: c,
+				manager:    newSetupManager(absoluteConfig),
+			}),
 		},
 		SingleInstance: &application.SingleInstanceOptions{
 			UniqueID: "com.observer.agent.desktop",
@@ -129,9 +149,9 @@ func main() {
 	c.app = app
 
 	window := app.Window.NewWithOptions(application.WebviewWindowOptions{
-		Title:            "Observer Agent",
+		Title:            windowTitle,
 		Width:            900,
-		Height:           660,
+		Height:           760,
 		BackgroundColour: application.NewRGB(15, 23, 42),
 		URL:              "/",
 	})
@@ -153,12 +173,26 @@ func main() {
 		window.Focus()
 	})
 	menu.Add("打开 hub Web").OnClick(func(ctx *application.Context) {
-		if err := openBrowser(cfg.Agent.Hub); err != nil {
+		hub := c.currentHub()
+		if hub == "" {
+			window.Show()
+			window.Focus()
+			return
+		}
+		if err := openBrowser(hub); err != nil {
 			log.Printf("打开浏览器失败: %v", err)
 		}
 	})
 	pauseItem := menu.Add("暂停巡检")
 	pauseItem.OnClick(func(ctx *application.Context) {
+		c.mu.Lock()
+		runnerReady := c.runner != nil
+		c.mu.Unlock()
+		if !runnerReady {
+			window.Show()
+			window.Focus()
+			return
+		}
 		c.mu.Lock()
 		c.paused = !c.paused
 		paused := c.paused
@@ -185,23 +219,126 @@ func main() {
 	tray.SetMenu(menu)
 
 	ctx, cancel := context.WithCancel(context.Background())
-	go c.start(ctx)
+	c.appCtx = ctx
 	go c.emitLoop(ctx)
+	if cfg != nil && !setupState.NeedsSetup {
+		c.startRunner(ctx)
+	}
 
 	if err := app.Run(); err != nil {
 		log.Fatal(err)
 	}
+	cancel()
+	c.stopRunner()
+}
+
+func (c *controller) currentHub() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.cfg == nil {
+		return ""
+	}
+	return c.cfg.Agent.Hub
+}
+
+// startRunner 启动一个新的 runner（设置保存后也会调用）。
+func (c *controller) startRunner(parent context.Context) {
+	c.mu.Lock()
+	if c.runnerStarted || c.cfg == nil || parent == nil {
+		c.mu.Unlock()
+		return
+	}
+	runCtx, cancel := context.WithCancel(parent)
+	done := make(chan struct{})
+	c.runnerStarted = true
+	c.runnerCancel = cancel
+	c.runnerDone = done
+	c.mu.Unlock()
+
+	go c.start(runCtx, done)
+}
+
+func (c *controller) stopRunner() {
+	c.mu.Lock()
+	cancel := c.runnerCancel
+	done := c.runnerDone
+	c.runnerCancel = nil
+	c.runnerDone = nil
+	c.runnerStarted = false
+	c.mu.Unlock()
+
+	if cancel != nil {
+		cancel()
+	}
+	if done != nil {
+		select {
+		case <-done:
+		case <-time.After(5 * time.Second):
+			log.Printf("等待旧 runner 关闭超时")
+		}
+	}
+
+	c.mu.Lock()
+	c.runner = nil
+	c.status.Running = false
+	c.mu.Unlock()
+}
+
+func (c *controller) restartRunner() {
+	c.stopRunner()
+	c.mu.Lock()
+	parent := c.appCtx
+	c.mu.Unlock()
+	if parent != nil {
+		c.startRunner(parent)
+	}
+}
+
+// applyConfig 在首次保存或设置保存后应用新配置并（重）启动 runner。
+func (c *controller) applyConfig(cfg *config.Config, state SetupState) {
+	c.mu.Lock()
+	c.cfg = cfg
+	c.setup = state
+	c.status.MachineID = cfg.Agent.MachineID
+	c.status.Hub = cfg.Agent.Hub
+	c.status.LastError = ""
+	c.status.Connected = false
+	parent := c.appCtx
+	started := c.runnerStarted
+	c.mu.Unlock()
+
+	if c.window != nil {
+		c.window.SetTitle("Observer Agent")
+	}
+	if c.app != nil {
+		c.app.Event.Emit("setup", state)
+	}
+	if started {
+		c.restartRunner()
+		return
+	}
+	if parent != nil {
+		c.startRunner(parent)
+	}
 }
 
 // start 在 Wails 应用启动后再初始化 runner（避免第二个实例争抢 SQLite 锁）。
-func (c *controller) start(ctx context.Context) {
+func (c *controller) start(ctx context.Context, done chan struct{}) {
+	defer close(done)
 	select {
 	case <-ctx.Done():
 		return
 	case <-time.After(500 * time.Millisecond):
 	}
 
-	runner, err := agentcore.New(c.cfg, version.Version)
+	c.mu.Lock()
+	cfg := c.cfg
+	c.mu.Unlock()
+	if cfg == nil {
+		return
+	}
+
+	runner, err := agentcore.New(cfg, version.Version)
 	if err != nil {
 		c.mu.Lock()
 		c.status.LastError = err.Error()
@@ -214,6 +351,13 @@ func (c *controller) start(ctx context.Context) {
 	c.mu.Lock()
 	c.runner = runner
 	c.mu.Unlock()
+	defer func() {
+		c.mu.Lock()
+		if c.runner == runner {
+			c.runner = nil
+		}
+		c.mu.Unlock()
+	}()
 
 	c.runLoop(ctx)
 }
