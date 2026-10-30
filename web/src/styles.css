@@ -84,7 +84,8 @@ a:hover {
 
 .main {
   padding: 28px 32px;
-  max-width: 1200px;
+  width: 100%;
+  min-width: 0;
 }
 
 h1 {
