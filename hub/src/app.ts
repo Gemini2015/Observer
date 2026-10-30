@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import Fastify, { type FastifyInstance } from 'fastify';
+import Fastify, { LogController, type FastifyInstance } from 'fastify';
 import cookie from '@fastify/cookie';
 import fastifyStatic from '@fastify/static';
 import { ZodError } from 'zod';
@@ -18,11 +18,25 @@ export interface BuildAppOptions {
 export function buildApp({ env, db, logger = true }: BuildAppOptions): FastifyInstance {
   const app = Fastify({
     logger: logger ? { level: env.OBSERVER_LOG_LEVEL } : false,
+    // 成功请求不刷日志（Web 控制台会定时轮询）；失败请求由下方 onResponse 记录。
+    logController: logger
+      ? new LogController({ disableRequestLogging: true })
+      : undefined,
   });
 
   app.register(cookie);
   app.addContentTypeParser('application/octet-stream', { parseAs: 'buffer' }, (_request, body, done) => {
     done(null, body);
+  });
+
+  // 仅记录失败请求，保留排障信息且避免正常轮询刷屏。
+  app.addHook('onResponse', async (request, reply) => {
+    if (reply.statusCode >= 400 && reply.statusCode < 500) {
+      request.log.warn(
+        { method: request.method, url: request.url, statusCode: reply.statusCode },
+        'request failed',
+      );
+    }
   });
 
   const publicDir = fileURLToPath(new URL('../public/', import.meta.url));
