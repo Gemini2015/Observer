@@ -189,17 +189,24 @@ export default function MachinesPage() {
       <div className="toolbar" style={{ justifyContent: 'space-between' }}>
         <h1>机器与挂载点</h1>
         <div className="toolbar">
-          <label>
-            扫描模式
-            <select
-              value={scanMode}
+          <div className="segmented">
+            <button
+              className={scanMode === 'incremental' ? 'primary' : 'ghost'}
+              type="button"
               disabled={scanning !== null}
-              onChange={(event) => setScanMode(event.target.value as ScanMode)}
+              onClick={() => setScanMode('incremental')}
             >
-              <option value="incremental">增量</option>
-              <option value="full">全量</option>
-            </select>
-          </label>
+              增量
+            </button>
+            <button
+              className={scanMode === 'full' ? 'primary' : 'ghost'}
+              type="button"
+              disabled={scanning !== null}
+              onClick={() => setScanMode('full')}
+            >
+              全量
+            </button>
+          </div>
           <button
             className="primary"
             type="button"
