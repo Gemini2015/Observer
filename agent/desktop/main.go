@@ -7,6 +7,7 @@ import (
 	"flag"
 	"log"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"sync"
 	"time"
@@ -68,7 +69,12 @@ func main() {
 	configPath := flag.String("config", "observer-agent.yaml", "agent 配置文件路径")
 	flag.Parse()
 
-	cfg, err := config.Load(*configPath)
+	absoluteConfig, err := filepath.Abs(*configPath)
+	if err != nil {
+		log.Fatalf("解析配置路径失败: %v", err)
+	}
+
+	cfg, err := config.Load(absoluteConfig)
 	if err != nil {
 		log.Fatalf("加载配置失败: %v", err)
 	}
@@ -152,7 +158,7 @@ func main() {
 	autostartItem := menu.AddCheckbox("开机启动", autostartEnabled())
 	autostartItem.OnClick(func(ctx *application.Context) {
 		enabled := ctx.ClickedMenuItem().Checked()
-		if err := setAutostart(enabled); err != nil {
+		if err := setAutostart(enabled, absoluteConfig); err != nil {
 			log.Printf("设置开机启动失败: %v", err)
 		}
 	})

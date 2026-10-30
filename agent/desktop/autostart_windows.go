@@ -23,7 +23,7 @@ func autostartEnabled() bool {
 	return err == nil
 }
 
-func setAutostart(enabled bool) error {
+func setAutostart(enabled bool, configPath string) error {
 	if !enabled {
 		key, err := registry.OpenKey(registry.CURRENT_USER, autostartKey, registry.SET_VALUE)
 		if err != nil {
@@ -45,5 +45,6 @@ func setAutostart(enabled bool) error {
 	if err != nil {
 		return err
 	}
-	return key.SetStringValue(autostartName, `"`+executable+`"`)
+	command := `"` + executable + `" -config "` + configPath + `"`
+	return key.SetStringValue(autostartName, command)
 }
