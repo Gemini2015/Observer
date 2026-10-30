@@ -214,6 +214,21 @@ func (c *Client) ListJobs(ctx context.Context, agentToken string, limit int) ([]
 	return result, nil
 }
 
+// MountSyncResponse 是挂载点同步结果。
+type MountSyncResponse struct {
+	Mounts []MountRef `json:"mounts"`
+}
+
+// SyncMounts 把 agent 当前挂载点配置同步到 hub（新增/更新/软删除）。
+func (c *Client) SyncMounts(ctx context.Context, agentToken string, mounts []EnrollMount) ([]MountRef, error) {
+	body := map[string]any{"mounts": mounts}
+	var response MountSyncResponse
+	if err := c.doJSON(ctx, http.MethodPut, "/api/v1/agent/mounts", agentToken, nil, body, &response); err != nil {
+		return nil, err
+	}
+	return response.Mounts, nil
+}
+
 // SubmitResults 上报一批结果。
 func (c *Client) SubmitResults(ctx context.Context, agentToken string, jobID, seq int64, entries []Entry) (*BatchResponse, error) {
 	body := map[string]any{"seq": seq, "entries": entries}

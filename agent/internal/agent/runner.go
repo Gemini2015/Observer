@@ -36,6 +36,8 @@ type Runner struct {
 	Now     func() time.Time
 	token   string
 
+	mountsSynced bool
+
 	progressMu sync.Mutex
 	current    *CurrentJob
 }
@@ -194,6 +196,10 @@ func (r *Runner) RunOnce(ctx context.Context) (scan.Stats, error) {
 		}
 	}
 
+	if err := r.ensureMountsSynced(ctx); err != nil {
+		return scan.Stats{}, err
+	}
+
 	r.flushSpool(ctx)
 
 	beat, err := r.Client.Heartbeat(ctx, r.token, hubclient.HeartbeatRequest{AgentVersion: r.Version})
@@ -307,17 +313,21 @@ func (r *Runner) findMount(mountID string) (config.Mount, bool) {
 	return config.Mount{}, false
 }
 
-func (r *Runner) enrollRequest() hubclient.EnrollRequest {
-	hostname, _ := os.Hostname()
-	request := hubclient.EnrollRequest{
-		MachineID:    r.Config.Agent.MachineID,
-		Label:        r.Config.Agent.Label,
-		Hostname:     hostname,
-		Platform:     runtime.GOOS,
-		Arch:         runtime.GOARCH,
-		AgentVersion: r.Version,
-		Mounts:       make([]hubclient.EnrollMount, 0, len(r.Config.Mounts)),
+// ensureMountsSynced 在首次心跳前把当前配置的挂载点同步到 hub。
+// 这样 GUI 新增/修改/删除挂载点后，重启 runner 即可生效，无需重新注册。
+func (r *Runner) ensureMountsSynced(ctx context.Context) error {
+	if r.mountsSynced {
+		return nil
 	}
+	if _, err := r.Client.SyncMounts(ctx, r.token, r.enrollMounts()); err != nil {
+		return fmt.Errorf("sync mounts: %w", err)
+	}
+	r.mountsSynced = true
+	return nil
+}
+
+func (r *Runner) enrollMounts() []hubclient.EnrollMount {
+	mounts := make([]hubclient.EnrollMount, 0, len(r.Config.Mounts))
 	for _, mount := range r.Config.Mounts {
 		include := mount.Include
 		if include == nil {
@@ -327,7 +337,7 @@ func (r *Runner) enrollRequest() hubclient.EnrollRequest {
 		if exclude == nil {
 			exclude = []string{}
 		}
-		request.Mounts = append(request.Mounts, hubclient.EnrollMount{
+		mounts = append(mounts, hubclient.EnrollMount{
 			MountID:       mount.ID,
 			Label:         mount.Label,
 			PhysicalPath:  mount.Path,
@@ -352,7 +362,20 @@ func (r *Runner) enrollRequest() hubclient.EnrollRequest {
 			RepairAllowed: mount.RepairAllowed != nil && *mount.RepairAllowed,
 		})
 	}
-	return request
+	return mounts
+}
+
+func (r *Runner) enrollRequest() hubclient.EnrollRequest {
+	hostname, _ := os.Hostname()
+	return hubclient.EnrollRequest{
+		MachineID:    r.Config.Agent.MachineID,
+		Label:        r.Config.Agent.Label,
+		Hostname:     hostname,
+		Platform:     runtime.GOOS,
+		Arch:         runtime.GOARCH,
+		AgentVersion: r.Version,
+		Mounts:       r.enrollMounts(),
+	}
 }
 
 func (r *Runner) flushSpool(ctx context.Context) {
