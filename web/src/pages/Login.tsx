@@ -26,6 +26,7 @@ export default function Login({ onSuccess }: { onSuccess: () => void }) {
   return (
     <div className="login">
       <div className="panel">
+        <img className="login-logo" src="/favicon.svg" alt="Observer" />
         <h1 style={{ marginBottom: 4 }}>Observer</h1>
         <p className="muted">多机文件完整性巡检</p>
         <form onSubmit={submit}>

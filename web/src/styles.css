@@ -47,9 +47,19 @@ a:hover {
 }
 
 .brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
   font-size: 20px;
   font-weight: 700;
   letter-spacing: 1px;
+}
+
+.brand-icon {
+  width: 28px;
+  height: 28px;
+  flex: none;
+  display: block;
 }
 
 .nav nav {
@@ -242,6 +252,13 @@ button:disabled {
 .login .panel {
   width: 320px;
   margin: 0;
+}
+
+.login-logo {
+  display: block;
+  width: 72px;
+  height: 72px;
+  margin: 4px auto 14px;
 }
 
 .login input {

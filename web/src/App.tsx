@@ -22,7 +22,10 @@ function Shell({ onLogout }: { onLogout: () => void }) {
   return (
     <div className="app">
       <aside className="nav">
-        <div className="brand">Observer</div>
+        <div className="brand">
+          <img className="brand-icon" src="/logo.svg" alt="" />
+          <span>Observer</span>
+        </div>
         <nav>
           {links.map((link) => {
             const active =
