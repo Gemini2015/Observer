@@ -91,6 +91,12 @@ export interface Issue {
   machine_id: string;
 }
 
+export interface EnrollTokenResult {
+  token: string;
+  expires_at: number;
+  machine_hint: string | null;
+}
+
 export interface Overview {
   machines: { total: number; online: number };
   mounts: { total: number };
