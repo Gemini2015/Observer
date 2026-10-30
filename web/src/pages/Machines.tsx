@@ -27,11 +27,8 @@ export default function MachinesPage() {
   const [rotating, setRotating] = useState<number | null>(null);
   const [creating, setCreating] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
-  const [scanMode, setScanMode] = useState<ScanMode>('incremental');
   const [scanning, setScanning] = useState<string | null>(null);
   const [scanMessage, setScanMessage] = useState<string | null>(null);
-
-  const modeLabel = scanMode === 'incremental' ? '增量' : '全量';
 
   const load = useCallback(() => {
     api<Machine[]>('/api/v1/machines')
@@ -101,22 +98,27 @@ export default function MachinesPage() {
 
   const scanTarget = async (
     scope: 'all' | 'machine' | 'mount',
+    mode: ScanMode,
     machine?: Machine,
     mount?: MountRef,
   ) => {
-    const label = scanMode === 'incremental' ? '增量' : '全量';
+    const label = mode === 'incremental' ? '增量' : '全量';
     if (scope === 'all') {
       if (!window.confirm(`确认对全部机器的所有挂载点执行${label}扫描？`)) return;
     } else if (scope === 'machine') {
       if (!window.confirm(`确认对机器「${machine?.machine_id}」的所有挂载点执行${label}扫描？`)) return;
     }
     const key =
-      scope === 'all' ? 'all' : scope === 'machine' ? `machine-${machine!.id}` : `mount-${mount!.id}`;
+      scope === 'all'
+        ? `all-${mode}`
+        : scope === 'machine'
+          ? `machine-${machine!.id}-${mode}`
+          : `mount-${mount!.id}-${mode}`;
     setScanning(key);
     setScanMessage(null);
     setActionError(null);
     try {
-      const body: Record<string, unknown> = { mode: scanMode };
+      const body: Record<string, unknown> = { mode };
       if (scope === 'machine') body.machine_pk = machine!.id;
       if (scope === 'mount') body.mount_pk = mount!.id;
       const result = await api<BulkScanResult>('/api/v1/scans', {
@@ -189,31 +191,21 @@ export default function MachinesPage() {
       <div className="toolbar" style={{ justifyContent: 'space-between' }}>
         <h1>机器与挂载点</h1>
         <div className="toolbar">
-          <div className="segmented">
-            <button
-              className={scanMode === 'incremental' ? 'primary' : 'ghost'}
-              type="button"
-              disabled={scanning !== null}
-              onClick={() => setScanMode('incremental')}
-            >
-              增量
-            </button>
-            <button
-              className={scanMode === 'full' ? 'primary' : 'ghost'}
-              type="button"
-              disabled={scanning !== null}
-              onClick={() => setScanMode('full')}
-            >
-              全量
-            </button>
-          </div>
           <button
             className="primary"
             type="button"
             disabled={scanning !== null || !machines || machines.length === 0}
-            onClick={() => void scanTarget('all')}
+            onClick={() => void scanTarget('all', 'incremental')}
           >
-            {scanning === 'all' ? '扫描中…' : `全部机器扫描（${modeLabel}）`}
+            {scanning === 'all-incremental' ? '扫描中…' : '全部机器增量扫描'}
+          </button>
+          <button
+            className="primary"
+            type="button"
+            disabled={scanning !== null || !machines || machines.length === 0}
+            onClick={() => void scanTarget('all', 'full')}
+          >
+            {scanning === 'all-full' ? '扫描中…' : '全部机器全量扫描'}
           </button>
           <button className="primary" type="button" onClick={() => setShowTokenForm((value) => !value)}>
             {showTokenForm ? '收起' : '注册新机器'}
@@ -318,9 +310,17 @@ export default function MachinesPage() {
                 className="ghost"
                 type="button"
                 disabled={scanning !== null}
-                onClick={() => void scanTarget('machine', machine)}
+                onClick={() => void scanTarget('machine', 'incremental', machine)}
               >
-                {scanning === `machine-${machine.id}` ? '扫描中…' : `整机扫描（${modeLabel}）`}
+                {scanning === `machine-${machine.id}-incremental` ? '扫描中…' : '整机增量'}
+              </button>
+              <button
+                className="ghost"
+                type="button"
+                disabled={scanning !== null}
+                onClick={() => void scanTarget('machine', 'full', machine)}
+              >
+                {scanning === `machine-${machine.id}-full` ? '扫描中…' : '整机全量'}
               </button>
               <Link className="ghost" to={`/files?machine_id=${encodeURIComponent(machine.machine_id)}`}>
                 文件
@@ -393,9 +393,17 @@ export default function MachinesPage() {
                         className="ghost"
                         type="button"
                         disabled={scanning !== null}
-                        onClick={() => void scanTarget('mount', machine, mount)}
+                        onClick={() => void scanTarget('mount', 'incremental', machine, mount)}
                       >
-                        {scanning === `mount-${mount.id}` ? '扫描中…' : `扫描（${modeLabel}）`}
+                        {scanning === `mount-${mount.id}-incremental` ? '扫描中…' : '增量扫描'}
+                      </button>{' '}
+                      <button
+                        className="ghost"
+                        type="button"
+                        disabled={scanning !== null}
+                        onClick={() => void scanTarget('mount', 'full', machine, mount)}
+                      >
+                        {scanning === `mount-${mount.id}-full` ? '扫描中…' : '全量扫描'}
                       </button>{' '}
                       <Link to={`/files?mount_pk=${mount.id}`}>文件</Link>{' '}
                       <button
