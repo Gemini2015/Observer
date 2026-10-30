@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#67E8F9"/>
+      <stop offset="1" stop-color="#22D3EE"/>
+    </linearGradient>
+    <filter id="docShadow" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="22" stdDeviation="24" flood-color="#020617" flood-opacity="0.45"/>
+    </filter>
+  </defs>
+
+  <circle cx="512" cy="512" r="332" fill="none" stroke="#38BDF8" stroke-opacity="0.58"
+          stroke-width="44" stroke-linecap="round" stroke-dasharray="430 261"
+          transform="rotate(-32 512 512)"/>
+  <circle cx="512" cy="512" r="278" fill="none" stroke="#BAE6FD" stroke-opacity="0.24"
+          stroke-width="10"/>
+
+  <rect x="352" y="278" width="320" height="466" rx="46" fill="#F8FAFC" filter="url(#docShadow)"/>
+  <rect x="414" y="382" width="198" height="24" rx="12" fill="#CBD5E1"/>
+  <rect x="414" y="440" width="166" height="24" rx="12" fill="#E2E8F0"/>
+  <rect x="414" y="498" width="198" height="24" rx="12" fill="#E2E8F0"/>
+
+  <path d="M 432 566 L 490 626 L 612 468" fill="none" stroke="#0B1220" stroke-opacity="0.18"
+        stroke-width="92" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M 432 566 L 490 626 L 612 468" fill="none" stroke="url(#accent)"
+        stroke-width="58" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

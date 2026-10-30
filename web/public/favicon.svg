@@ -1,0 +1,49 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="tileBg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0B1220"/>
+      <stop offset="0.58" stop-color="#12306B"/>
+      <stop offset="1" stop-color="#1D4ED8"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.35" cy="0.25" r="0.75">
+      <stop offset="0" stop-color="#7DD3FC" stop-opacity="0.18"/>
+      <stop offset="1" stop-color="#7DD3FC" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#67E8F9"/>
+      <stop offset="1" stop-color="#22D3EE"/>
+    </linearGradient>
+    <filter id="docShadow" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="18" stdDeviation="22" flood-color="#020617" flood-opacity="0.38"/>
+    </filter>
+    <clipPath id="tileClip">
+      <rect x="0" y="0" width="1024" height="1024" rx="224"/>
+    </clipPath>
+  </defs>
+
+  <g clip-path="url(#tileClip)">
+    <rect width="1024" height="1024" fill="url(#tileBg)"/>
+    <rect width="1024" height="1024" fill="url(#glow)"/>
+
+    <!-- 观测/扫描环 -->
+    <circle cx="512" cy="512" r="332" fill="none" stroke="#38BDF8" stroke-opacity="0.38"
+            stroke-width="42" stroke-linecap="round" stroke-dasharray="430 261"
+            transform="rotate(-32 512 512)"/>
+    <circle cx="512" cy="512" r="278" fill="none" stroke="#BAE6FD" stroke-opacity="0.18"
+            stroke-width="10"/>
+
+    <!-- 文件卡片 -->
+    <rect x="352" y="278" width="320" height="466" rx="46" fill="#F8FAFC" filter="url(#docShadow)"/>
+    <rect x="414" y="382" width="198" height="24" rx="12" fill="#CBD5E1"/>
+    <rect x="414" y="440" width="166" height="24" rx="12" fill="#E2E8F0"/>
+    <rect x="414" y="498" width="198" height="24" rx="12" fill="#E2E8F0"/>
+
+    <!-- 校验对勾 -->
+    <path d="M 432 566 L 490 626 L 612 468" fill="none" stroke="#0B1220" stroke-opacity="0.16"
+          stroke-width="92" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M 432 566 L 490 626 L 612 468" fill="none" stroke="url(#accent)"
+          stroke-width="58" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+  <rect x="2" y="2" width="1020" height="1020" rx="222" fill="none"
+        stroke="#93C5FD" stroke-opacity="0.20" stroke-width="4"/>
+</svg>

@@ -5,11 +5,11 @@
 	"info": {
 		"0409": {
 			"ProductVersion": "0.1.0",
-			"CompanyName": "My Company",
-			"FileDescription": "A spike application",
-			"LegalCopyright": "© 2026, My Company",
-			"ProductName": "My Product",
-			"Comments": "This is a comment"
+			"CompanyName": "Observer",
+			"FileDescription": "Observer 文件完整性巡检客户端",
+			"LegalCopyright": "© 2026 Observer",
+			"ProductName": "Observer Agent",
+			"Comments": "多机文件完整性巡检与修复"
 		}
 	}
 }
