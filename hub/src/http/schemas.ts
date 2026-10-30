@@ -96,3 +96,29 @@ export const AgentJobsQuery = z.object({
 export const MountSyncSchema = z.object({
   mounts: z.array(MountInput).min(1).max(256),
 });
+
+const fileFilters = {
+  q: z.string().max(512).optional(),
+  machine_id: z.string().max(128).optional(),
+  mount_pk: z.coerce.number().int().positive().optional(),
+  mount_id: z.string().max(128).optional(),
+  state: z.enum(['active', 'missing', 'out_of_scope']).optional(),
+  issue: z.enum(['open', 'none']).optional(),
+  hash: z.enum(['hashed', 'unhashed']).optional(),
+  size_min: z.coerce.number().int().min(0).optional(),
+  size_max: z.coerce.number().int().min(0).optional(),
+  sort: z.enum(['path', 'size', 'last_seen', 'last_hashed', 'state']).default('path'),
+  order: z.enum(['asc', 'desc']).default('asc'),
+};
+
+export const FileListQuerySchema = z.object({
+  ...fileFilters,
+  limit: z.coerce.number().int().min(1).max(200).default(50),
+  offset: z.coerce.number().int().min(0).default(0),
+});
+
+export const FileExportQuerySchema = z.object({
+  ...fileFilters,
+  limit: z.coerce.number().int().min(1).max(5000).default(5000),
+  offset: z.coerce.number().int().min(0).default(0),
+});

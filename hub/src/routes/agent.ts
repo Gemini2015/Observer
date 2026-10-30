@@ -5,6 +5,7 @@ import { requireAgent } from '../http/auth.js';
 import {
   AgentJobsQuery,
   EnrollInputSchema,
+  FileListQuerySchema,
   FinishSchema,
   HeartbeatInput,
   IdParam,
@@ -24,6 +25,7 @@ import {
   listJobsForMachine,
 } from '../services/jobs.js';
 import { processBatch } from '../services/ingest.js';
+import { getFileDetail, listFiles } from '../services/files.js';
 import { streamManifest } from '../services/manifest.js';
 import { syncAgentMounts } from '../services/mount-sync.js';
 import {
@@ -64,6 +66,24 @@ export function registerAgentRoutes(app: FastifyInstance, ctx: RouteContext): vo
     const identity = getAgentIdentity(ctx.db, agent);
     if (!identity) throw new HttpError(404, 'machine not found');
     return identity;
+  });
+
+  app.get('/api/v1/agent/files', async (request) => {
+    const agent = requireAgent(ctx.db, request);
+    const query = FileListQuerySchema.parse(request.query ?? {});
+    return listFiles(ctx.db, {
+      ...query,
+      machine_id: undefined,
+      scopeMachinePk: agent.machine_pk,
+    });
+  });
+
+  app.get('/api/v1/agent/files/:id', async (request) => {
+    const agent = requireAgent(ctx.db, request);
+    const pathId = IdParam.parse((request.params as { id: string }).id);
+    const detail = getFileDetail(ctx.db, pathId, agent.machine_pk);
+    if (!detail) throw new HttpError(404, 'file not found');
+    return detail;
   });
 
   app.post('/api/v1/agent/heartbeat', async (request) => {

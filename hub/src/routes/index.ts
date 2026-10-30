@@ -4,6 +4,7 @@ import type { Db } from '../db/index.js';
 import { registerAgentRoutes } from './agent.js';
 import { registerAuthRoutes } from './auth.js';
 import { registerDashboardRoutes } from './dashboard.js';
+import { registerFileRoutes } from './files.js';
 import { registerRepairRoutes } from './repairs.js';
 import { registerTokenRoutes } from './tokens.js';
 import { registerHealthRoutes } from './health.js';
@@ -21,6 +22,7 @@ export function registerRoutes(app: FastifyInstance, ctx: RouteContext): void {
   registerAgentRoutes(app, ctx);
   registerMountRoutes(app, ctx);
   registerIssueRoutes(app, ctx);
+  registerFileRoutes(app, ctx);
   registerRepairRoutes(app, ctx);
   registerTokenRoutes(app, ctx);
   registerDashboardRoutes(app, ctx);
