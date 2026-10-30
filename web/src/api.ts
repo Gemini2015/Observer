@@ -104,6 +104,29 @@ export interface AgentAccessTokenResult {
   revoked_agents: number;
 }
 
+export type ScanMode = 'incremental' | 'full';
+
+export interface BulkScanCreated {
+  job_id: number;
+  mount_pk: number;
+  mount_id: string;
+  machine_id: string;
+}
+
+export interface BulkScanSkipped {
+  mount_pk: number;
+  mount_id: string;
+  machine_id: string;
+  reason: string;
+}
+
+export interface BulkScanResult {
+  mode: ScanMode;
+  total_mounts: number;
+  created: BulkScanCreated[];
+  skipped: BulkScanSkipped[];
+}
+
 export interface Overview {
   machines: { total: number; online: number };
   mounts: { total: number };

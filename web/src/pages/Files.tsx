@@ -13,10 +13,7 @@ import {
   type Machine,
 } from '../api';
 
-type Scope = 'global' | 'machine' | 'mount';
-
-interface Filters {
-  q: string;
+interface Filters {  q: string;
   machineId: string;
   mountPk: string;
   state: string;
@@ -85,12 +82,6 @@ function toApiParams(filters: Filters, overrideLimit?: number): URLSearchParams 
   return params;
 }
 
-function scopeOf(filters: Filters): Scope {
-  if (filters.mountPk) return 'mount';
-  if (filters.machineId) return 'machine';
-  return 'global';
-}
-
 function fullPath(detail: FileDetail): string {
   const base = detail.mount.physical_path.replace(/[\\/]+$/, '');
   const relative = detail.file.path_key.replace(/\//g, '\\');
@@ -125,12 +116,16 @@ export default function FilesPage() {
   const [exporting, setExporting] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
 
-  const scope = scopeOf(filters);
-  const selectedMachine = useMemo(
-    () => machines?.find((machine) => machine.machine_id === filters.machineId) ?? null,
-    [machines, filters.machineId],
-  );
-  const mountOptions = selectedMachine?.mounts ?? [];
+  const mountOptions = useMemo(() => {
+    const machineList = machines ?? [];
+    if (filters.machineId) {
+      const machine = machineList.find((item) => item.machine_id === filters.machineId);
+      return (machine?.mounts ?? []).map((mount) => ({ machine, mount }));
+    }
+    return machineList.flatMap((machine) =>
+      machine.mounts.map((mount) => ({ machine, mount })),
+    );
+  }, [machines, filters.machineId]);
 
   useEffect(() => {
     api<Machine[]>('/api/v1/machines')
@@ -195,48 +190,21 @@ export default function FilesPage() {
     };
   }, [selectedId]);
 
-  useEffect(() => {
-    const machineList = machines ?? [];
-    if (machineList.length === 0 || scope === 'global') return;
-    if (!filters.machineId) {
-      setFilters((prev) => ({ ...prev, machineId: machineList[0]!.machine_id, page: 1 }));
-      return;
-    }
-    if (scope === 'mount' && !filters.mountPk) {
-      const machine = machineList.find((item) => item.machine_id === filters.machineId);
-      const firstMount = machine?.mounts[0];
-      if (firstMount) {
-        setFilters((prev) => ({ ...prev, mountPk: String(firstMount.id), page: 1 }));
-      }
-    }
-  }, [machines, scope, filters.machineId, filters.mountPk]);
-
   const update = (patch: Partial<Filters>) => {
     setFilters((prev) => ({ ...prev, ...patch, page: patch.page ?? 1 }));
     setSelectedId(null);
   };
 
   const selectMachine = (machineId: string) => {
-    const machine = machines?.find((item) => item.machine_id === machineId);
-    const firstMount = machine?.mounts[0];
-    update({
-      machineId,
-      mountPk: scope === 'mount' && firstMount ? String(firstMount.id) : '',
-    });
+    update({ machineId, mountPk: '' });
   };
 
-  const switchScope = (next: Scope) => {
-    if (next === 'global') {
-      update({ machineId: '', mountPk: '' });
-      return;
-    }
-    const machineId = filters.machineId || machines?.[0]?.machine_id || '';
-    if (next === 'machine') {
-      update({ machineId, mountPk: '' });
-      return;
-    }
-    const machine = machines?.find((item) => item.machine_id === machineId);
-    update({ machineId, mountPk: String(machine?.mounts[0]?.id ?? '') });
+  const selectMount = (mountPk: string) => {
+    const entry = mountOptions.find((item) => String(item.mount.id) === mountPk);
+    update({
+      mountPk,
+      machineId: entry?.machine?.machine_id ?? filters.machineId,
+    });
   };
 
   const exportCsv = async () => {
@@ -285,60 +253,31 @@ export default function FilesPage() {
       </div>
 
       <div className="panel">
-        <div className="toolbar">
-          <button
-            className={scope === 'global' ? 'primary' : 'ghost'}
-            type="button"
-            onClick={() => switchScope('global')}
-          >
-            全局
-          </button>
-          <button
-            className={scope === 'machine' ? 'primary' : 'ghost'}
-            type="button"
-            onClick={() => switchScope('machine')}
-          >
-            机器
-          </button>
-          <button
-            className={scope === 'mount' ? 'primary' : 'ghost'}
-            type="button"
-            onClick={() => switchScope('mount')}
-          >
-            挂载点
-          </button>
-          {scope !== 'global' ? (
-            <label>
-              机器
-              <select value={filters.machineId} onChange={(event) => selectMachine(event.target.value)}>
-                <option value="">全部机器</option>
-                {(machines ?? []).map((machine) => (
-                  <option key={machine.machine_id} value={machine.machine_id}>
-                    {machine.label ?? machine.machine_id}
-                  </option>
-                ))}
-              </select>
-            </label>
-          ) : null}
-          {scope === 'mount' ? (
-            <label>
-              挂载点
-              <select
-                value={filters.mountPk}
-                onChange={(event) => update({ mountPk: event.target.value })}
-              >
-                <option value="">全部挂载点</option>
-                {mountOptions.map((mount) => (
-                  <option key={mount.id} value={String(mount.id)}>
-                    {mount.label ?? mount.mount_id}
-                  </option>
-                ))}
-              </select>
-            </label>
-          ) : null}
-        </div>
-
         <div className="filter-grid">
+          <label>
+            机器
+            <select value={filters.machineId} onChange={(event) => selectMachine(event.target.value)}>
+              <option value="">全部机器</option>
+              {(machines ?? []).map((machine) => (
+                <option key={machine.machine_id} value={machine.machine_id}>
+                  {machine.label ?? machine.machine_id}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            挂载点
+            <select value={filters.mountPk} onChange={(event) => selectMount(event.target.value)}>
+              <option value="">全部挂载点</option>
+              {mountOptions.map(({ machine, mount }) => (
+                <option key={mount.id} value={String(mount.id)}>
+                  {filters.machineId
+                    ? mount.label ?? mount.mount_id
+                    : `${machine?.label ?? machine?.machine_id ?? '-'} / ${mount.label ?? mount.mount_id}`}
+                </option>
+              ))}
+            </select>
+          </label>
           <label>
             搜索路径 / SHA-256
             <input
