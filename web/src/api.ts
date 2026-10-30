@@ -157,6 +157,79 @@ export interface Replica {
   confidence: string;
 }
 
+export interface FileSummary {
+  total: number;
+  active: number;
+  missing: number;
+  out_of_scope: number;
+  hashed: number;
+  unhashed: number;
+  open_issue_paths: number;
+}
+
+export interface FileItem {
+  id: number;
+  machine_id: string;
+  machine_label: string | null;
+  mount_pk: number;
+  mount_id: string;
+  mount_label: string | null;
+  path_key: string;
+  path_display_b64: string;
+  state: string;
+  size: number;
+  mtime_ns: string;
+  content_hash: string | null;
+  last_seen_at: number | null;
+  last_hashed_at: number | null;
+  last_hash_kind: string | null;
+  open_issue_count: number;
+}
+
+export interface FileList {
+  items: FileItem[];
+  total: number;
+  limit: number;
+  offset: number;
+  summary: FileSummary;
+}
+
+export interface FileIssueDetail {
+  id: number;
+  type: string;
+  status: string;
+  confidence: string;
+  occurrences: number;
+  first_seen_at: number;
+  last_seen_at: number;
+  evidence: Record<string, unknown> | null;
+}
+
+export interface FileObservation {
+  hash: string;
+  kind: string;
+  observed_at: number;
+}
+
+export interface FileDetail {
+  file: FileItem;
+  machine: {
+    machine_id: string;
+    label: string | null;
+    status: string;
+    platform: string | null;
+  };
+  mount: {
+    id: number;
+    mount_id: string;
+    label: string | null;
+    physical_path: string;
+    state: string;
+  };
+  issues: FileIssueDetail[];
+  observations: FileObservation[];
+}
+
 export interface ReplicaResponse {
   issue_id: number;
   expected_hash: string | null;
@@ -216,6 +289,42 @@ export function formatRelative(value?: number | null): string {
 
 export function formatRatio(ratio: number): string {
   return `${(ratio * 100).toFixed(1)}%`;
+}
+
+export function formatBytes(value?: number | null): string {
+  const size = Number(value ?? 0);
+  if (!Number.isFinite(size) || size <= 0) return '0 B';
+  const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB'];
+  let index = 0;
+  let current = size;
+  while (current >= 1024 && index < units.length - 1) {
+    current /= 1024;
+    index += 1;
+  }
+  return `${current.toFixed(index === 0 ? 0 : 1)} ${units[index]}`;
+}
+
+/** mtime_ns 是十进制纳秒字符串，用 BigInt 转毫秒避免精度丢失。 */
+export function formatNs(value?: string | null): string {
+  if (!value) return '-';
+  try {
+    return new Date(Number(BigInt(value) / 1_000_000n)).toLocaleString();
+  } catch {
+    return value;
+  }
+}
+
+export function fileStateLabel(state: string): string {
+  switch (state) {
+    case 'active':
+      return '正常';
+    case 'missing':
+      return '缺失';
+    case 'out_of_scope':
+      return '已移出规则';
+    default:
+      return state;
+  }
 }
 
 export function decodePath(base64: string): string {

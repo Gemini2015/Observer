@@ -297,3 +297,88 @@ button.danger {
 button.danger:hover {
   background: rgba(248, 113, 113, 0.12);
 }
+
+.filter-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 10px 14px;
+  align-items: end;
+  margin: 12px 0;
+}
+
+.filter-grid label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.filter-grid input,
+.filter-grid select {
+  padding: 7px 9px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 13px;
+  background: var(--panel);
+  color: var(--text);
+}
+
+.chips {
+  flex-wrap: wrap;
+}
+
+.chip {
+  display: inline-block;
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--panel);
+  color: var(--text);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+button.chip:hover {
+  border-color: var(--accent);
+}
+
+.table-wrap {
+  overflow-x: auto;
+}
+
+.files-table {
+  min-width: 980px;
+}
+
+.files-table tbody tr {
+  cursor: pointer;
+}
+
+.files-table tbody tr:hover {
+  background: rgba(59, 130, 246, 0.06);
+}
+
+.files-table tbody tr.selected {
+  background: rgba(59, 130, 246, 0.1);
+}
+
+.file-path {
+  font-family: Consolas, 'Cascadia Mono', monospace;
+  font-size: 12px;
+  word-break: break-all;
+}
+
+.file-detail h2 {
+  margin: 14px 0 6px;
+}
+
+.file-detail .ghost {
+  display: inline-block;
+  padding: 8px 14px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  text-decoration: none;
+  color: var(--text);
+}
+

@@ -235,6 +235,9 @@ export default function MachinesPage() {
               </span>
             </h2>
             <div className="panel-actions">
+              <Link className="ghost" to={`/files?machine_id=${encodeURIComponent(machine.machine_id)}`}>
+                文件
+              </Link>
               <button
                 className="ghost"
                 type="button"
@@ -299,6 +302,7 @@ export default function MachinesPage() {
                     </td>
                     <td>{mount.manifest_epoch}</td>
                     <td>
+                      <Link to={`/files?mount_pk=${mount.id}`}>文件</Link>{' '}
                       <button
                         className="ghost danger"
                         type="button"

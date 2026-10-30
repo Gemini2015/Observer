@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { Link, useParams } from 'react-router-dom';
 import { api, formatRatio, formatTime, statusClass, type MountDetail } from '../api';
 
 export default function MountDetailPage() {
@@ -116,6 +116,9 @@ export default function MountDetailPage() {
           <button className="ghost" type="button" disabled={busy} onClick={() => trigger('full')}>
             全量巡检
           </button>
+          <Link className="ghost" to={`/files?mount_pk=${mount.id}`}>
+            查看文件
+          </Link>
           {message ? <span className="muted">{message}</span> : null}
         </div>
         {lastJob ? (

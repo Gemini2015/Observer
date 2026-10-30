@@ -1,4 +1,5 @@
 import { Fragment, useCallback, useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import {
   api,
   decodePath,
@@ -290,7 +291,11 @@ export default function IssuesPage() {
                       <span className={issueClass(issue.type)}>{issue.type}</span>
                     </td>
                     <td>
-                      <div>{decodePath(issue.path_display_b64)}</div>
+                      <Link
+                        to={`/files?machine_id=${encodeURIComponent(issue.machine_id)}&q=${encodeURIComponent(issue.path_key)}`}
+                      >
+                        {decodePath(issue.path_display_b64)}
+                      </Link>
                       <div className="muted">{issue.path_key}</div>
                       {issue.evidence ? (
                         <details>

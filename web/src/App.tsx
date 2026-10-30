@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { BrowserRouter, Link, Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import { api } from './api';
+import Files from './pages/Files';
 import Issues from './pages/Issues';
 import Jobs from './pages/Jobs';
 import Login from './pages/Login';
@@ -11,6 +12,7 @@ import Overview from './pages/Overview';
 const links = [
   { to: '/', label: '总览' },
   { to: '/machines', label: '机器与挂载点' },
+  { to: '/files', label: '文件' },
   { to: '/jobs', label: '任务' },
   { to: '/issues', label: '异常' },
 ];
@@ -41,6 +43,7 @@ function Shell({ onLogout }: { onLogout: () => void }) {
         <Routes>
           <Route path="/" element={<Overview />} />
           <Route path="/machines" element={<Machines />} />
+          <Route path="/files" element={<Files />} />
           <Route path="/mounts/:id" element={<MountDetail />} />
           <Route path="/jobs" element={<Jobs />} />
           <Route path="/issues" element={<Issues />} />
