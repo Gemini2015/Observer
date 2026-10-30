@@ -2,7 +2,10 @@ import type { FastifyInstance } from 'fastify';
 import type { RouteContext } from './index.js';
 import { HttpError } from '../http/errors.js';
 import { requireSession } from '../http/auth.js';
-import { computeCoverage, RECHECK_DAYS } from '../services/jobs.js';
+import { IdParam } from '../http/schemas.js';
+import { deleteMachine } from '../services/deletion.js';
+import { transfersPath } from '../services/repairs.js';
+import { computeCoverage, jobView, RECHECK_DAYS, type JobViewRow } from '../services/jobs.js';
 
 interface MachineRow {
   id: number;
@@ -23,44 +26,6 @@ interface MountRow {
   label: string | null;
   state: string;
   manifest_epoch: number;
-}
-
-interface JobRow {
-  id: number;
-  mount_pk: number;
-  mode: string;
-  status: string;
-  attempt: number;
-  created_at: number;
-  started_at: number | null;
-  finished_at: number | null;
-  stats_json: string | null;
-  mount_id: string;
-  machine_id: string;
-}
-
-function parseStats(raw: string | null): Record<string, unknown> | null {
-  if (!raw) return null;
-  try {
-    return JSON.parse(raw) as Record<string, unknown>;
-  } catch {
-    return null;
-  }
-}
-
-function jobView(row: JobRow): Record<string, unknown> {
-  return {
-    id: row.id,
-    mode: row.mode,
-    status: row.status,
-    attempt: row.attempt,
-    created_at: row.created_at,
-    started_at: row.started_at,
-    finished_at: row.finished_at,
-    stats: parseStats(row.stats_json),
-    mount_id: row.mount_id,
-    machine_id: row.machine_id,
-  };
 }
 
 export function registerDashboardRoutes(app: FastifyInstance, ctx: RouteContext): void {
@@ -118,7 +83,7 @@ export function registerDashboardRoutes(app: FastifyInstance, ctx: RouteContext)
       .prepare(
         'SELECT j.id, j.mount_pk, j.mode, j.status, j.attempt, j.created_at, j.started_at, j.finished_at, j.stats_json, m.mount_id, mc.machine_id FROM scan_jobs j JOIN mounts m ON m.id = j.mount_pk JOIN machines mc ON mc.id = m.machine_pk ORDER BY j.id DESC LIMIT 10',
       )
-      .all() as JobRow[];
+      .all() as JobViewRow[];
 
     return {
       machines,
@@ -162,6 +127,18 @@ export function registerDashboardRoutes(app: FastifyInstance, ctx: RouteContext)
         })),
       };
     });
+  });
+
+  app.delete('/api/v1/machines/:id', async (request) => {
+    requireSession(ctx.db, request);
+    const machinePk = IdParam.parse((request.params as { id: string }).id);
+    const result = deleteMachine(
+      ctx.db,
+      machinePk,
+      transfersPath(ctx.env.OBSERVER_DATA_DIR),
+    );
+    if (!result) throw new HttpError(404, 'machine not found');
+    return { ok: true, ...result };
   });
 
   app.get('/api/v1/audit', async (request) => {
@@ -216,7 +193,7 @@ export function registerDashboardRoutes(app: FastifyInstance, ctx: RouteContext)
          FROM scan_jobs j JOIN mounts m ON m.id = j.mount_pk JOIN machines mc ON mc.id = m.machine_pk
          ${where} ORDER BY j.id DESC LIMIT ?`,
       )
-      .all(...params) as JobRow[];
+      .all(...params) as JobViewRow[];
 
     return rows.map(jobView);
   });
@@ -231,7 +208,7 @@ export function registerDashboardRoutes(app: FastifyInstance, ctx: RouteContext)
       .prepare(
         'SELECT j.id, j.mount_pk, j.mode, j.status, j.attempt, j.created_at, j.started_at, j.finished_at, j.stats_json, m.mount_id, mc.machine_id FROM scan_jobs j JOIN mounts m ON m.id = j.mount_pk JOIN machines mc ON mc.id = m.machine_pk WHERE j.id = ?',
       )
-      .get(jobId) as JobRow | undefined;
+      .get(jobId) as JobViewRow | undefined;
     if (!row) throw new HttpError(404, 'job not found');
     return jobView(row);
   });

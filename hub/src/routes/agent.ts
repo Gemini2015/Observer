@@ -3,6 +3,7 @@ import type { RouteContext } from './index.js';
 import { HttpError } from '../http/errors.js';
 import { requireAgent } from '../http/auth.js';
 import {
+  AgentJobsQuery,
   EnrollInputSchema,
   FinishSchema,
   HeartbeatInput,
@@ -14,7 +15,13 @@ import {
 } from '../http/schemas.js';
 import { enrollAgent, heartbeatAgent } from '../services/registry.js';
 import { findUsableEnrollToken } from '../services/tokens.js';
-import { dispatchJobForAgent, finishJob, getMount } from '../services/jobs.js';
+import {
+  dispatchJobForAgent,
+  finishJob,
+  getMount,
+  jobView,
+  listJobsForMachine,
+} from '../services/jobs.js';
 import { processBatch } from '../services/ingest.js';
 import { streamManifest } from '../services/manifest.js';
 import {
@@ -74,6 +81,12 @@ export function registerAgentRoutes(app: FastifyInstance, ctx: RouteContext): vo
       transfers: agentTransferTasks(ctx.db, agent.machine_pk),
       repairs: agentRepairTasks(ctx.db, agent.machine_pk),
     };
+  });
+
+  app.get('/api/v1/agent/jobs', async (request) => {
+    const agent = requireAgent(ctx.db, request);
+    const { limit } = AgentJobsQuery.parse(request.query ?? {});
+    return listJobsForMachine(ctx.db, agent.machine_pk, limit).map(jobView);
   });
 
   app.post('/api/v1/jobs/:id/results', async (request) => {

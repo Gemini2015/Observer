@@ -64,6 +64,60 @@ export interface Coverage {
   ratio: number;
 }
 
+/** Web/agent 任务列表的展示行。 */
+export interface JobViewRow {
+  id: number;
+  mount_pk: number;
+  mode: string;
+  status: string;
+  attempt: number;
+  created_at: number;
+  started_at: number | null;
+  finished_at: number | null;
+  stats_json: string | null;
+  mount_id: string;
+  machine_id: string;
+}
+
+export function parseStatsJson(raw: string | null): Record<string, unknown> | null {
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
+
+export function jobView(row: JobViewRow): Record<string, unknown> {
+  return {
+    id: row.id,
+    mode: row.mode,
+    status: row.status,
+    attempt: row.attempt,
+    created_at: row.created_at,
+    started_at: row.started_at,
+    finished_at: row.finished_at,
+    stats: parseStatsJson(row.stats_json),
+    mount_id: row.mount_id,
+    machine_id: row.machine_id,
+  };
+}
+
+/** 某台机器最近的扫描任务（agent token 场景使用）。 */
+export function listJobsForMachine(db: Db, machinePk: number, limit = 20): JobViewRow[] {
+  return db
+    .prepare(
+      `SELECT j.id, j.mount_pk, j.mode, j.status, j.attempt, j.created_at, j.started_at, j.finished_at, j.stats_json, m.mount_id, mc.machine_id
+       FROM scan_jobs j
+       JOIN mounts m ON m.id = j.mount_pk
+       JOIN machines mc ON mc.id = m.machine_pk
+       WHERE m.machine_pk = ?
+       ORDER BY j.id DESC
+       LIMIT ?`,
+    )
+    .all(machinePk, limit) as JobViewRow[];
+}
+
 export function getMount(db: Db, mountPk: number): MountRow | undefined {
   return db.prepare('SELECT * FROM mounts WHERE id = ?').get(mountPk) as MountRow | undefined;
 }

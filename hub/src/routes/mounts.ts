@@ -5,6 +5,8 @@ import { requireSession } from '../http/auth.js';
 import { IdParam, ScanRequest } from '../http/schemas.js';
 import { computeCoverage, createScanJob, getMount, type MountRow } from '../services/jobs.js';
 import { parseSchedule } from '../services/scheduler.js';
+import { deleteMount } from '../services/deletion.js';
+import { transfersPath } from '../services/repairs.js';
 
 function mountView(
   db: RouteContext['db'],
@@ -55,6 +57,18 @@ export function registerMountRoutes(app: FastifyInstance, ctx: RouteContext): vo
       .get(mountPk) as Record<string, unknown> | undefined;
 
     return { ...mountView(ctx.db, mount, Date.now()), last_job: lastJob ?? null };
+  });
+
+  app.delete('/api/v1/mounts/:id', async (request) => {
+    requireSession(ctx.db, request);
+    const mountPk = IdParam.parse((request.params as { id: string }).id);
+    const result = deleteMount(
+      ctx.db,
+      mountPk,
+      transfersPath(ctx.env.OBSERVER_DATA_DIR),
+    );
+    if (!result) throw new HttpError(404, 'mount not found');
+    return { ok: true, ...result };
   });
 
   app.post('/api/v1/mounts/:id/scan', async (request, reply) => {

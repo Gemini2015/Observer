@@ -88,3 +88,7 @@ export const CreateEnrollTokenSchema = z.object({
   machine_hint: z.string().min(1).max(128).optional(),
   ttl_hours: z.number().int().min(1).max(720).default(24),
 });
+
+export const AgentJobsQuery = z.object({
+  limit: z.coerce.number().int().min(1).max(100).default(20),
+});
