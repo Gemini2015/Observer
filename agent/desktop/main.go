@@ -151,8 +151,8 @@ func main() {
 
 	window := app.Window.NewWithOptions(application.WebviewWindowOptions{
 		Title:            windowTitle,
-		Width:            900,
-		Height:           760,
+		Width:            1100,
+		Height:           800,
 		BackgroundColour: application.NewRGB(15, 23, 42),
 		URL:              "/",
 	})
