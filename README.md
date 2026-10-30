@@ -1,5 +1,9 @@
 # Observer
 
+<p align="center">
+  <img src="docs/assets/icon.png" width="112" height="112" alt="Observer icon" />
+</p>
+
 > 观测者：多机文件完整性巡检与修复系统。
 
 Observer 由**中心服（hub）**和部署在各台机器上的 **agent** 组成。agent 定期校验本地文件哈希，与 hub 保存的基线比对；发现内容不一致、文件缺失或不可读时生成异常，并可从另一台机器的健康副本跨机恢复。
