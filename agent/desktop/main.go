@@ -6,6 +6,7 @@ import (
 	"embed"
 	"flag"
 	"log"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
@@ -66,12 +67,24 @@ func init() {
 }
 
 func main() {
-	configPath := flag.String("config", "observer-agent.yaml", "agent 配置文件路径")
+	configPath := flag.String("config", "", "配置文件路径（默认：exe 同级目录下的 agent.yaml）")
 	flag.Parse()
 
-	absoluteConfig, err := filepath.Abs(*configPath)
+	resolved := *configPath
+	if resolved == "" {
+		executable, exeErr := os.Executable()
+		if exeErr != nil {
+			log.Fatalf("定位程序路径失败: %v", exeErr)
+		}
+		resolved = filepath.Join(filepath.Dir(executable), "agent.yaml")
+	}
+	absoluteConfig, err := filepath.Abs(resolved)
 	if err != nil {
 		log.Fatalf("解析配置路径失败: %v", err)
+	}
+	// 让配置中的相对路径（token_file/state_dir/mounts）相对配置文件目录解析。
+	if err := os.Chdir(filepath.Dir(absoluteConfig)); err != nil {
+		log.Fatalf("切换工作目录失败: %v", err)
 	}
 
 	cfg, err := config.Load(absoluteConfig)
