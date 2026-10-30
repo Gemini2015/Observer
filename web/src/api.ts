@@ -97,6 +97,13 @@ export interface EnrollTokenResult {
   machine_hint: string | null;
 }
 
+export interface AgentAccessTokenResult {
+  token: string;
+  agent_id: number;
+  machine_id: string;
+  revoked_agents: number;
+}
+
 export interface Overview {
   machines: { total: number; online: number };
   mounts: { total: number };

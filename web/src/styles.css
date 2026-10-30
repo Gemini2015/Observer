@@ -281,6 +281,14 @@ button:disabled {
   margin: 0;
 }
 
+.panel-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
 button.danger {
   color: #f87171;
   border-color: rgba(248, 113, 113, 0.4);

@@ -6,6 +6,7 @@ import {
   formatRelative,
   formatTime,
   statusClass,
+  type AgentAccessTokenResult,
   type EnrollTokenResult,
   type Machine,
   type MountRef,
@@ -20,6 +21,8 @@ export default function MachinesPage() {
   const [machineHint, setMachineHint] = useState('');
   const [ttlHours, setTtlHours] = useState(24);
   const [issued, setIssued] = useState<EnrollTokenResult | null>(null);
+  const [accessToken, setAccessToken] = useState<AgentAccessTokenResult | null>(null);
+  const [rotating, setRotating] = useState<number | null>(null);
   const [creating, setCreating] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
@@ -56,10 +59,36 @@ export default function MachinesPage() {
 
   const copyToken = async () => {
     if (!issued) return;
+    await copyText(issued.token);
+  };
+
+  const copyText = async (value: string) => {
     try {
-      await navigator.clipboard.writeText(issued.token);
+      await navigator.clipboard.writeText(value);
     } catch {
       // 剪贴板不可用时用户可手动选中复制
+    }
+  };
+
+  const issueAccessToken = async (machine: Machine) => {
+    if (
+      !window.confirm(
+        `重新生成机器「${machine.machine_id}」的接入 token？\n旧 token 将立即失效，旧 agent 会掉线；token 只显示这一次。`,
+      )
+    ) {
+      return;
+    }
+    setActionError(null);
+    setRotating(machine.id);
+    try {
+      const result = await api<AgentAccessTokenResult>(`/api/v1/machines/${machine.id}/token`, {
+        method: 'POST',
+      });
+      setAccessToken(result);
+    } catch (err) {
+      setActionError((err as Error).message);
+    } finally {
+      setRotating(null);
     }
   };
 
@@ -118,6 +147,9 @@ export default function MachinesPage() {
       {showTokenForm ? (
         <div className="panel">
           <h2>生成注册 token</h2>
+          <p className="muted">
+            注册 token 仅用于新节点首次注册，一次性；已有节点重连请用机器面板里的「获取接入 token」。
+          </p>
           {issued ? (
             <>
               <p className="muted">
@@ -167,6 +199,30 @@ export default function MachinesPage() {
         </div>
       ) : null}
 
+      {accessToken ? (
+        <div className="panel">
+          <div className="panel-header">
+            <h2>接入 token · {accessToken.machine_id}</h2>
+            <button className="ghost" type="button" onClick={() => setAccessToken(null)}>
+              关闭
+            </button>
+          </div>
+          <p className="muted">
+            长期有效，可多次使用；token 只显示这一次，重新生成后旧 token 立即失效。
+            在 agent GUI 首次配置里粘贴，点「识别已有节点」即可自动填充机器与挂载点。
+          </p>
+          <pre className="code">{accessToken.token}</pre>
+          <div className="toolbar">
+            <button className="ghost" type="button" onClick={() => void copyText(accessToken.token)}>
+              复制接入 token
+            </button>
+            <span className="muted">
+              agent {accessToken.agent_id} · 撤销旧 agent {accessToken.revoked_agents} 个
+            </span>
+          </div>
+        </div>
+      ) : null}
+
       {actionError ? <div className="error">{actionError}</div> : null}
       {machines.length === 0 ? <div className="muted">还没有 agent 注册</div> : null}
       {machines.map((machine) => (
@@ -178,14 +234,24 @@ export default function MachinesPage() {
                 ({machine.machine_id} · {machine.status})
               </span>
             </h2>
-            <button
-              className="ghost danger"
-              type="button"
-              disabled={deleting === `machine-${machine.id}`}
-              onClick={() => void removeMachine(machine)}
-            >
-              {deleting === `machine-${machine.id}` ? '删除中…' : '删除机器'}
-            </button>
+            <div className="panel-actions">
+              <button
+                className="ghost"
+                type="button"
+                disabled={rotating === machine.id}
+                onClick={() => void issueAccessToken(machine)}
+              >
+                {rotating === machine.id ? '生成中…' : '获取接入 token'}
+              </button>
+              <button
+                className="ghost danger"
+                type="button"
+                disabled={deleting === `machine-${machine.id}`}
+                onClick={() => void removeMachine(machine)}
+              >
+                {deleting === `machine-${machine.id}` ? '删除中…' : '删除机器'}
+              </button>
+            </div>
           </div>
           <p className="muted">
             {machine.hostname ?? '-'} · {machine.platform ?? '-'}/{machine.arch ?? '-'} · agent{' '}
