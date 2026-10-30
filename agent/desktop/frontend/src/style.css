@@ -342,3 +342,52 @@ button.ghost:hover {
   flex: 1;
 }
 
+.file-filters {
+  align-items: flex-end;
+}
+
+.file-filters .field {
+  min-width: 140px;
+  flex: 1;
+}
+
+.files-summary {
+  margin: 4px 0 10px;
+}
+
+.files-wrap {
+  max-height: 360px;
+  overflow: auto;
+}
+
+.files-table {
+  min-width: 760px;
+}
+
+.files-table tbody tr {
+  cursor: pointer;
+}
+
+.files-table tbody tr:hover {
+  background: rgba(56, 189, 248, 0.08);
+}
+
+.file-path {
+  font-family: Consolas, "Cascadia Mono", monospace;
+  font-size: 12px;
+  word-break: break-all;
+}
+
+#file-detail {
+  margin-top: 12px;
+}
+
+#file-detail h2 {
+  margin: 12px 0 6px;
+}
+
+button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+

@@ -1,5 +1,5 @@
 import { Browser, Dialogs, Events } from "@wailsio/runtime";
-import { ConfigService } from "../bindings/observer/agent/desktop";
+import { ConfigService, FileService } from "../bindings/observer/agent/desktop";
 
 const $ = (id) => document.getElementById(id);
 
@@ -8,6 +8,13 @@ let latestStatus = null;
 let setupMounts = [];
 let settingsMounts = [];
 let settingsLoaded = false;
+let filesLoaded = false;
+let filesOffset = 0;
+const filesLimit = 50;
+let filesTotal = 0;
+let filesCurrent = [];
+let filesQueryTimer = null;
+let selectedFileId = null;
 
 function show(element) {
   element.classList.remove("hidden");
@@ -43,6 +50,41 @@ function makeInput(placeholder = "") {
 
 function formatTime(value) {
   return value ? new Date(value).toLocaleString() : "-";
+}
+
+function decodePathB64(value) {
+  try {
+    const bytes = Uint8Array.from(atob(value ?? ""), (char) => char.charCodeAt(0));
+    return new TextDecoder().decode(bytes);
+  } catch {
+    return value ?? "";
+  }
+}
+
+function formatBytes(value) {
+  const size = Number(value ?? 0);
+  if (!Number.isFinite(size) || size <= 0) return "0 B";
+  const units = ["B", "KiB", "MiB", "GiB", "TiB"];
+  let index = 0;
+  let current = size;
+  while (current >= 1024 && index < units.length - 1) {
+    current /= 1024;
+    index += 1;
+  }
+  return `${current.toFixed(index === 0 ? 0 : 1)} ${units[index]}`;
+}
+
+function fileStateLabel(state) {
+  switch (state) {
+    case "active":
+      return "正常";
+    case "missing":
+      return "缺失";
+    case "out_of_scope":
+      return "已移出规则";
+    default:
+      return state || "-";
+  }
 }
 
 function statsSummary(stats) {
@@ -284,11 +326,20 @@ function showMain() {
 
 function switchTab(tab) {
   const statusTab = tab === "status";
+  const filesTab = tab === "files";
+  const settingsTab = tab === "settings";
   $("status-view").classList.toggle("hidden", !statusTab);
-  $("settings-view").classList.toggle("hidden", statusTab);
+  $("files-view").classList.toggle("hidden", !filesTab);
+  $("settings-view").classList.toggle("hidden", !settingsTab);
   $("nav-status").classList.toggle("active", statusTab);
-  $("nav-settings").classList.toggle("active", !statusTab);
-  if (!statusTab && !settingsLoaded) void loadSettings();
+  $("nav-files").classList.toggle("active", filesTab);
+  $("nav-settings").classList.toggle("active", settingsTab);
+  if (filesTab && !filesLoaded) {
+    filesLoaded = true;
+    void loadFileMounts();
+    void loadFiles(true);
+  }
+  if (settingsTab && !settingsLoaded) void loadSettings();
 }
 
 async function loadSettings() {
@@ -326,6 +377,277 @@ function settingsPayload() {
     label: $("settings-label").value.trim(),
     mounts: settingsMounts.map(mountToInput),
   };
+}
+
+function fileQueryPayload() {
+  return {
+    q: $("files-q").value.trim(),
+    mount_id: $("files-mount").value,
+    state: $("files-state").value,
+    issue: $("files-issue").value,
+    hash: $("files-hash").value,
+    sort: $("files-sort").value,
+    order: $("files-order").value,
+    limit: filesLimit,
+    offset: filesOffset,
+  };
+}
+
+async function loadFileMounts() {
+  const select = $("files-mount");
+  const current = select.value;
+  try {
+    const mounts = await FileService.Mounts();
+    select.replaceChildren();
+    const all = document.createElement("option");
+    all.value = "";
+    all.textContent = "全部";
+    select.appendChild(all);
+    for (const mount of mounts ?? []) {
+      const option = document.createElement("option");
+      option.value = mount.id;
+      option.textContent = mount.label || mount.id;
+      select.appendChild(option);
+    }
+    select.value = current;
+  } catch {
+    // 文件页加载时会再次报错，这里不打断
+  }
+}
+
+async function loadFiles(reset = false) {
+  if (reset) {
+    filesOffset = 0;
+    hideFileDetail();
+  }
+  const error = $("files-error");
+  hide(error);
+  try {
+    const result = await FileService.ListFiles(fileQueryPayload());
+    filesLoaded = true;
+    filesCurrent = result.items ?? [];
+    filesTotal = result.total ?? 0;
+    renderFiles(result);
+  } catch (err) {
+    error.textContent = err?.message || String(err);
+    show(error);
+    $("files-empty").classList.add("hidden");
+    $("files-table").classList.add("hidden");
+    $("files-total").textContent = "";
+  }
+}
+
+function renderFiles(result) {
+  const summary = result.summary ?? {};
+  $("files-summary").textContent =
+    `共 ${summary.total ?? 0} · 正常 ${summary.active ?? 0} · 缺失 ${summary.missing ?? 0}` +
+    ` · 有异常 ${summary.open_issue_paths ?? 0} · 已哈希 ${summary.hashed ?? 0}`;
+
+  const tbody = $("files-rows");
+  tbody.replaceChildren();
+  const items = result.items ?? [];
+  const empty = $("files-empty");
+  const table = $("files-table");
+  if (items.length === 0) {
+    show(empty);
+    hide(table);
+  } else {
+    hide(empty);
+    show(table);
+  }
+
+  for (const item of items) {
+    const row = document.createElement("tr");
+    const path = decodePathB64(item.path_display_b64) || item.path_key;
+    const cells = [
+      path,
+      item.mount_label || item.mount_id,
+      fileStateLabel(item.state),
+      formatBytes(item.size),
+      formatTime(item.last_seen_at),
+      item.content_hash ? item.content_hash.slice(0, 12) : "-",
+      item.open_issue_count > 0 ? String(item.open_issue_count) : "-",
+    ];
+    for (const value of cells) {
+      const cell = document.createElement("td");
+      cell.textContent = value;
+      if (value === path) cell.className = "file-path";
+      row.appendChild(cell);
+    }
+    row.addEventListener("click", () => {
+      void toggleFileDetail(item.id);
+    });
+    tbody.appendChild(row);
+  }
+
+  const pages = Math.max(1, Math.ceil(filesTotal / filesLimit));
+  const page = Math.floor(filesOffset / filesLimit) + 1;
+  $("files-total").textContent = `共 ${filesTotal} 条 · 第 ${page}/${pages} 页`;
+  $("files-prev").disabled = filesOffset <= 0;
+  $("files-next").disabled = filesOffset + filesLimit >= filesTotal;
+}
+
+function hideFileDetail() {
+  selectedFileId = null;
+  hide($("file-detail"));
+  $("file-detail").replaceChildren();
+}
+
+function detailCopyButton(text) {
+  const button = document.createElement("button");
+  button.className = "ghost";
+  button.type = "button";
+  button.textContent = "复制完整路径";
+  button.addEventListener("click", async () => {
+    try {
+      await navigator.clipboard.writeText(text);
+      button.textContent = "已复制";
+      setTimeout(() => {
+        button.textContent = "复制完整路径";
+      }, 1200);
+    } catch {
+      button.textContent = "复制失败";
+    }
+  });
+  return button;
+}
+
+async function toggleFileDetail(pathId) {
+  if (selectedFileId === pathId) {
+    hideFileDetail();
+    return;
+  }
+  selectedFileId = pathId;
+  const panel = $("file-detail");
+  show(panel);
+  panel.replaceChildren(Object.assign(document.createElement("div"), {
+    className: "muted",
+    textContent: "加载文件详情…",
+  }));
+  try {
+    const detail = await FileService.FileDetail(pathId);
+    if (selectedFileId !== pathId) return;
+    renderFileDetail(detail);
+  } catch (error) {
+    panel.replaceChildren(Object.assign(document.createElement("div"), {
+      className: "error",
+      textContent: error?.message || String(error),
+    }));
+  }
+}
+
+function renderFileDetail(detail) {
+  const panel = $("file-detail");
+  panel.replaceChildren();
+  const file = detail.file ?? {};
+  const mount = detail.mount ?? {};
+  const machine = detail.machine ?? {};
+
+  const header = document.createElement("div");
+  header.className = "toolbar";
+  header.style.justifyContent = "space-between";
+  const title = document.createElement("h2");
+  title.textContent = "文件详情";
+  header.appendChild(title);
+  const close = document.createElement("button");
+  close.className = "ghost";
+  close.type = "button";
+  close.textContent = "关闭";
+  close.addEventListener("click", hideFileDetail);
+  header.appendChild(close);
+  panel.appendChild(header);
+
+  const relative = file.path_key ?? "";
+  const base = String(mount.physical_path ?? "").replace(/[\\/]+$/, "");
+  const fullPath = base ? `${base}\\${relative.replace(/\//g, "\\")}` : relative;
+
+  const pathLine = document.createElement("p");
+  pathLine.className = "file-path";
+  pathLine.textContent = fullPath;
+  panel.appendChild(pathLine);
+
+  const info = document.createElement("p");
+  info.className = "muted";
+  info.textContent =
+    `${machine.machine_id ?? "-"} / ${mount.mount_id ?? "-"} · ${fileStateLabel(file.state)}` +
+    ` · ${formatBytes(file.size)} · 最后发现 ${formatTime(file.last_seen_at)}` +
+    ` · 最后哈希 ${formatTime(file.last_hashed_at)}` +
+    ` · 异常 ${file.open_issue_count ?? 0}`;
+  panel.appendChild(info);
+
+  if (file.content_hash) {
+    const hashLine = document.createElement("p");
+    hashLine.className = "muted file-path";
+    hashLine.textContent = `SHA-256: ${file.content_hash}`;
+    panel.appendChild(hashLine);
+  }
+  const actions = document.createElement("div");
+  actions.className = "toolbar";
+  actions.appendChild(detailCopyButton(fullPath));
+  panel.appendChild(actions);
+
+  const issues = detail.issues ?? [];
+  const issuesHeading = document.createElement("h2");
+  issuesHeading.textContent = `异常（${issues.length}）`;
+  panel.appendChild(issuesHeading);
+  if (issues.length === 0) {
+    const none = document.createElement("div");
+    none.className = "muted";
+    none.textContent = "无异常记录";
+    panel.appendChild(none);
+  } else {
+    const table = document.createElement("table");
+    table.className = "jobs";
+    table.innerHTML = "<thead><tr><th>类型</th><th>状态</th><th>次数</th><th>最近</th></tr></thead>";
+    const tbody = document.createElement("tbody");
+    for (const issue of issues) {
+      const row = document.createElement("tr");
+      for (const value of [
+        issue.type ?? "-",
+        issue.status ?? "-",
+        String(issue.occurrences ?? 0),
+        formatTime(issue.last_seen_at),
+      ]) {
+        const cell = document.createElement("td");
+        cell.textContent = value;
+        row.appendChild(cell);
+      }
+      tbody.appendChild(row);
+    }
+    table.appendChild(tbody);
+    panel.appendChild(table);
+  }
+
+  const observations = detail.observations ?? [];
+  const historyHeading = document.createElement("h2");
+  historyHeading.textContent = `最近观测（${observations.length}）`;
+  panel.appendChild(historyHeading);
+  if (observations.length === 0) {
+    const none = document.createElement("div");
+    none.className = "muted";
+    none.textContent = "暂无观测记录";
+    panel.appendChild(none);
+  } else {
+    const table = document.createElement("table");
+    table.className = "jobs";
+    table.innerHTML = "<thead><tr><th>哈希</th><th>类型</th><th>时间</th></tr></thead>";
+    const tbody = document.createElement("tbody");
+    for (const observation of observations) {
+      const row = document.createElement("tr");
+      for (const value of [
+        String(observation.hash ?? "").slice(0, 16),
+        observation.kind ?? "-",
+        formatTime(observation.observed_at),
+      ]) {
+        const cell = document.createElement("td");
+        cell.textContent = value;
+        row.appendChild(cell);
+      }
+      tbody.appendChild(row);
+    }
+    table.appendChild(tbody);
+    panel.appendChild(table);
+  }
 }
 
 document.addEventListener("DOMContentLoaded", () => {
@@ -382,7 +704,44 @@ document.addEventListener("DOMContentLoaded", () => {
   });
 
   $("nav-status").addEventListener("click", () => switchTab("status"));
+  $("nav-files").addEventListener("click", () => switchTab("files"));
   $("nav-settings").addEventListener("click", () => switchTab("settings"));
+  $("files-refresh").addEventListener("click", () => void loadFiles(false));
+  $("files-reset").addEventListener("click", () => {
+    $("files-q").value = "";
+    $("files-mount").value = "";
+    $("files-state").value = "";
+    $("files-issue").value = "";
+    $("files-hash").value = "";
+    $("files-sort").value = "path";
+    $("files-order").value = "asc";
+    void loadFiles(true);
+  });
+  for (const id of ["files-mount", "files-state", "files-issue", "files-hash", "files-sort", "files-order"]) {
+    $(id).addEventListener("change", () => void loadFiles(true));
+  }
+  $("files-q").addEventListener("input", () => {
+    if (filesQueryTimer) clearTimeout(filesQueryTimer);
+    filesQueryTimer = setTimeout(() => {
+      filesQueryTimer = null;
+      void loadFiles(true);
+    }, 300);
+  });
+  $("files-prev").addEventListener("click", () => {
+    filesOffset = Math.max(0, filesOffset - filesLimit);
+    void loadFiles(false);
+  });
+  $("files-next").addEventListener("click", () => {
+    if (filesOffset + filesLimit < filesTotal) {
+      filesOffset += filesLimit;
+      void loadFiles(false);
+    }
+  });
+  $("files-open-hub").addEventListener("click", () => {
+    const machine = latestStatus?.machine_id || "";
+    const suffix = machine ? `?machine_id=${encodeURIComponent(machine)}` : "";
+    openHub(`${hubUrl || "http://127.0.0.1:8787"}/files${suffix}`);
+  });
   $("settings-add-mount").addEventListener("click", () => {
     settingsMounts.push({ id: "", label: "", path: "", sentinel: "", exclude: [], repair_allowed: false, isNew: true });
     renderMounts($("settings-mounts"), settingsMounts, { idEditable: false });

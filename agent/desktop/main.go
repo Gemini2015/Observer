@@ -127,6 +127,7 @@ func main() {
 				controller: c,
 				manager:    newSetupManager(absoluteConfig),
 			}),
+			application.NewService(&FileService{controller: c}),
 		},
 		SingleInstance: &application.SingleInstanceOptions{
 			UniqueID: "com.observer.agent.desktop",

@@ -68,6 +68,7 @@
           <h1>Observer Agent</h1>
           <nav class="nav">
             <button id="nav-status" class="nav-btn active" type="button">状态</button>
+            <button id="nav-files" class="nav-btn" type="button">文件</button>
             <button id="nav-settings" class="nav-btn" type="button">设置</button>
           </nav>
           <span id="conn" class="badge">连接中</span>
@@ -130,6 +131,104 @@
             <h2>最近错误</h2>
             <div id="error" class="error">无</div>
           </section>
+        </div>
+
+        <div id="files-view" class="hidden">
+          <div class="toolbar" style="justify-content: space-between">
+            <h2>本机文件</h2>
+            <div class="toolbar">
+              <button id="files-refresh" class="ghost" type="button">刷新</button>
+              <button id="files-open-hub" class="ghost" type="button">在 hub 中查看</button>
+            </div>
+          </div>
+
+          <div class="panel">
+            <div class="toolbar file-filters">
+              <label class="field">
+                <span>挂载点</span>
+                <select id="files-mount">
+                  <option value="">全部</option>
+                </select>
+              </label>
+              <label class="field">
+                <span>搜索路径 / SHA-256</span>
+                <input id="files-q" placeholder="路径关键字或 64 位哈希" autocomplete="off" />
+              </label>
+              <label class="field">
+                <span>状态</span>
+                <select id="files-state">
+                  <option value="">全部</option>
+                  <option value="active">正常</option>
+                  <option value="missing">缺失</option>
+                  <option value="out_of_scope">已移出规则</option>
+                </select>
+              </label>
+              <label class="field">
+                <span>异常</span>
+                <select id="files-issue">
+                  <option value="">全部</option>
+                  <option value="open">有未处理异常</option>
+                  <option value="none">无未处理异常</option>
+                </select>
+              </label>
+              <label class="field">
+                <span>哈希</span>
+                <select id="files-hash">
+                  <option value="">全部</option>
+                  <option value="hashed">已哈希</option>
+                  <option value="unhashed">未哈希</option>
+                </select>
+              </label>
+              <label class="field">
+                <span>排序</span>
+                <select id="files-sort">
+                  <option value="path">路径</option>
+                  <option value="size">大小</option>
+                  <option value="last_seen">最后发现</option>
+                  <option value="last_hashed">最后哈希</option>
+                  <option value="state">状态</option>
+                </select>
+              </label>
+              <label class="field">
+                <span>顺序</span>
+                <select id="files-order">
+                  <option value="asc">升序</option>
+                  <option value="desc">降序</option>
+                </select>
+              </label>
+              <button id="files-reset" class="ghost" type="button">重置</button>
+            </div>
+
+            <div id="files-summary" class="stats muted">-</div>
+            <div id="files-error" class="error hidden"></div>
+            <div id="files-empty" class="muted hidden">暂无文件，请先完成一次 baseline/full 巡检。</div>
+            <div class="files-wrap">
+              <table class="jobs files-table hidden" id="files-table">
+                <thead>
+                  <tr>
+                    <th>路径</th>
+                    <th>挂载点</th>
+                    <th>状态</th>
+                    <th>大小</th>
+                    <th>最后发现</th>
+                    <th>哈希</th>
+                    <th>异常</th>
+                  </tr>
+                </thead>
+                <tbody id="files-rows"></tbody>
+              </table>
+            </div>
+
+            <div class="toolbar" style="justify-content: space-between; margin-top: 10px">
+              <span id="files-total" class="muted"></span>
+              <div class="toolbar">
+                <button id="files-prev" class="ghost" type="button">上一页</button>
+                <button id="files-next" class="ghost" type="button">下一页</button>
+              </div>
+            </div>
+          </div>
+
+          <div id="file-detail" class="panel hidden"></div>
         </div>
 
         <div id="settings-view" class="hidden">
