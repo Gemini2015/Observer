@@ -30,16 +30,23 @@ sudo journalctl -u observer-agent -f
 
 ## 3. NAS / 服务器（Docker Compose）
 
+在仓库根目录执行：
+
 ```bash
-export OBSERVER_ADMIN_PASSWORD='change-me'
-export OBSERVER_ENROLL_TOKEN='<token>'
-cp deploy/agent.example.yaml deploy/agent.yaml   # 修改 hub 地址
-mkdir -p deploy/mounts/photos
-docker compose -f deploy/docker-compose.yml up -d
+cd deploy
+cp .env.example .env                  # 填入 OBSERVER_ADMIN_PASSWORD / OBSERVER_ENROLL_TOKEN
+cp agent.example.yaml agent.yaml
+# 编辑 agent.yaml：hub 改为 http://hub:8787；path /media/photos 对应下面挂载目录
+mkdir -p mounts/photos
+echo 'mount_id=photos' > mounts/photos/.observer-mount   # sentinel，缺失会跳过该 mount
+docker compose up -d --build
+docker compose ps
 ```
 
-- agent 容器：`read_only: true`、distroless nonroot（UID 65532，可用 `AGENT_UID/AGENT_GID` 覆盖）、媒体只读 bind mount、状态卷可写。
-- hub 容器：`/data` 卷保存 SQLite + 修复中转；升级时保留卷即可，迁移自动执行。
+- hub 容器：`OBSERVER_HOST=0.0.0.0` + `8787:8787`；`/data` 卷保存 SQLite + 修复中转，镜像已创建可写的 `/data` 属主，升级时保留卷即可、迁移自动执行。
+- agent 容器：`read_only: true`、distroless nonroot（UID 65532，可用 `AGENT_UID/AGENT_GID` 覆盖）、媒体只读 bind mount、`/var/lib/observer` 状态卷可写（镜像已创建目录属主）。
+- 旧版本创建过的 named volume 若报权限错误（Permission denied），需要重建卷或调整卷内属主；新部署会自动正确。
+- hub 默认监听容器内 `0.0.0.0`；不要在 compose 里改回 `127.0.0.1`，否则宿主机端口映射无法访问。
 - TLS：建议在 compose 前加 Caddy 反向代理（示例）：
 
 ```caddyfile
@@ -96,7 +103,8 @@ spctl -a -vv "bin/Observer Agent.app"
 | 项 | 状态 |
 | --- | --- |
 | Linux amd64 / arm64 交叉编译、ELF、大小 | ✅ 已验证（7.3 / 6.8 MiB） |
-| systemd unit / compose / Dockerfile 语法与关键指令 | ✅ 静态检查（无 Docker/systemd 环境，未实际启动） |
+| Dockerfile / compose 静态检查 | ⚠️ 已修复构建/监听/卷权限问题；本机无 Docker，未实际 build/run |
+| systemd unit | ✅ 静态检查（本机无 systemd 环境，未实际启动） |
 | Windows agent / 桌面 exe | ✅ 构建、启动、单实例 |
 | Wails NSIS 打包 | ❌ 未验证（未安装 NSIS） |
 | macOS 构建 / 签名 / 公证 | ❌ 未验证（需 Mac + Apple 证书） |

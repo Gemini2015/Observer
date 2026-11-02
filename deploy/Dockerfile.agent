@@ -13,12 +13,17 @@ COPY agent/go.mod agent/go.sum ./
 RUN go mod download
 
 COPY agent/ ./
-ARG TARGETOS=linux
-ARG TARGETARCH=amd64
-RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
+# 使用 BuildKit 自动平台参数：ARM NAS 会构建 arm64，而不是默认 amd64。
+ARG TARGETOS
+ARG TARGETARCH
+RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH:-amd64} \
     go build -trimpath -ldflags="-s -w" -o /out/observer-agent ./cmd/observer-agent
+# 在 builder 中创建状态目录并设置 nonroot 属主；distroless 没有 shell/chown。
+RUN mkdir -p /out/observer-state && touch /out/observer-state/.keep \
+    && chown -R 65532:65532 /out/observer-state
 
 FROM gcr.io/distroless/static-debian12:nonroot
+COPY --from=build --chown=nonroot:nonroot /out/observer-state /var/lib/observer
 COPY --from=build /out/observer-agent /usr/local/bin/observer-agent
 USER nonroot:nonroot
 ENTRYPOINT ["/usr/local/bin/observer-agent"]

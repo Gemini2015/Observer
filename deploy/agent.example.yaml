@@ -3,6 +3,7 @@
 agent:
   machine_id: nas-01
   label: NAS
+  # Docker Compose 内填 http://hub:8787；systemd/宿主机填实际 hub 地址。
   hub: https://observer.example.com
 
   # 二选一：

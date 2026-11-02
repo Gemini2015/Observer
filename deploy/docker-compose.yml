@@ -1,10 +1,11 @@
 name: observer
 
 # 使用前：
-#   cp deploy/agent.example.yaml deploy/agent.yaml   # 修改 hub 地址与 mount 路径
-#   export OBSERVER_ADMIN_PASSWORD='...'
-#   export OBSERVER_ENROLL_TOKEN='...(token:create 生成)'
-#   docker compose -f deploy/docker-compose.yml up -d
+#   cp deploy/.env.example deploy/.env                    # 填入密码与注册 token
+#   cp deploy/agent.example.yaml deploy/agent.yaml         # agent.hub 改成 http://hub:8787
+#   mkdir -p deploy/mounts/photos
+#   echo 'mount_id=photos' > deploy/mounts/photos/.observer-mount
+#   docker compose -f deploy/docker-compose.yml up -d --build
 #
 # NAS 上建议：
 # - 媒体目录只读挂载（./mounts/photos:/media/photos:ro）
@@ -19,6 +20,7 @@ services:
       dockerfile: deploy/Dockerfile.hub
     restart: unless-stopped
     environment:
+      OBSERVER_HOST: "0.0.0.0"
       OBSERVER_DATA_DIR: /data
       OBSERVER_PORT: "8787"
       OBSERVER_ADMIN_PASSWORD: ${OBSERVER_ADMIN_PASSWORD:?请设置 OBSERVER_ADMIN_PASSWORD}
@@ -39,6 +41,7 @@ services:
       interval: 30s
       timeout: 5s
       retries: 3
+      start_period: 15s
 
   agent:
     build:
