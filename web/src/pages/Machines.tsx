@@ -1,50 +1,87 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
   api,
-  formatRatio,
-  formatRelative,
-  formatTime,
-  statusClass,
   type AgentAccessTokenResult,
   type BulkScanResult,
   type EnrollTokenResult,
   type Machine,
-  type MountRef,
   type ScanMode,
 } from '../api';
+import { EmptyState } from '../components/EmptyState';
+import { Menu } from '../components/Menu';
+import { Modal } from '../components/Modal';
+import { PageHeader } from '../components/PageHeader';
+import { PageLoading } from '../components/PageLoading';
+import { ProgressBar } from '../components/ProgressBar';
+import { StatusBadge } from '../components/StatusBadge';
+import { useConfirm } from '../components/ConfirmDialog';
+import { useToast } from '../components/Toast';
+import { copyText } from '../lib/clipboard';
+import { formatCount, formatRelative, formatTime } from '../lib/format';
+import { useDocumentTitle, usePolling } from '../lib/hooks';
+import { labelOf, machineStatus, mountState } from '../lib/labels';
+
+const TTL_OPTIONS = [
+  { hours: 24, label: '24 小时' },
+  { hours: 72, label: '72 小时' },
+  { hours: 168, label: '7 天' },
+];
+
+function modeLabel(mode: ScanMode): string {
+  return mode === 'incremental' ? '增量' : '全量';
+}
+
+function machineCoverage(machine: Machine): { ratio: number | null; hashed: number; total: number } {
+  let total = 0;
+  let hashed = 0;
+  for (const mount of machine.mounts) {
+    total += mount.coverage?.total ?? 0;
+    hashed += mount.coverage?.hashed ?? 0;
+  }
+  if (total === 0) return { ratio: null, hashed: 0, total: 0 };
+  return { ratio: hashed / total, hashed, total };
+}
+
+function mountSummary(machine: Machine): string {
+  if (machine.mounts.length === 0) return '无挂载点';
+  const counts = new Map<string, number>();
+  for (const mount of machine.mounts) {
+    const label = labelOf(mountState, mount.state).label;
+    counts.set(label, (counts.get(label) ?? 0) + 1);
+  }
+  return Array.from(counts.entries())
+    .map(([label, count]) => `${label} ${count}`)
+    .join(' · ');
+}
 
 export default function MachinesPage() {
-  const [machines, setMachines] = useState<Machine[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [actionError, setActionError] = useState<string | null>(null);
-  const [deleting, setDeleting] = useState<string | null>(null);
-  const [showTokenForm, setShowTokenForm] = useState(false);
+  useDocumentTitle('机器与挂载点');
+  const toast = useToast();
+  const confirm = useConfirm();
+
+  const { data: machines, error, lastUpdatedAt, reload } = usePolling(
+    async (signal) => api<Machine[]>('/api/v1/machines', { signal }),
+    { intervalMs: 5_000 },
+  );
+
+  const [pending, setPending] = useState<string | null>(null);
+  const [enrollOpen, setEnrollOpen] = useState(false);
   const [machineHint, setMachineHint] = useState('');
   const [ttlHours, setTtlHours] = useState(24);
   const [issued, setIssued] = useState<EnrollTokenResult | null>(null);
+  const [enrollBusy, setEnrollBusy] = useState(false);
   const [accessToken, setAccessToken] = useState<AgentAccessTokenResult | null>(null);
-  const [rotating, setRotating] = useState<number | null>(null);
-  const [creating, setCreating] = useState(false);
-  const [formError, setFormError] = useState<string | null>(null);
-  const [scanning, setScanning] = useState<string | null>(null);
-  const [scanMessage, setScanMessage] = useState<string | null>(null);
 
-  const load = useCallback(() => {
-    api<Machine[]>('/api/v1/machines')
-      .then(setMachines)
-      .catch((err: Error) => setError(err.message));
-  }, []);
+  const closeEnroll = () => {
+    setEnrollOpen(false);
+    setIssued(null);
+    setMachineHint('');
+    setTtlHours(24);
+  };
 
-  useEffect(() => {
-    load();
-    const timer = setInterval(load, 5000);
-    return () => clearInterval(timer);
-  }, [load]);
-
-  const createToken = async () => {
-    setCreating(true);
-    setFormError(null);
+  const createEnrollToken = async () => {
+    setEnrollBusy(true);
     try {
       const result = await api<EnrollTokenResult>('/api/v1/enroll-tokens', {
         method: 'POST',
@@ -55,373 +92,381 @@ export default function MachinesPage() {
       });
       setIssued(result);
     } catch (err) {
-      setFormError((err as Error).message);
+      toast.error('生成注册 token 失败', (err as Error).message);
     } finally {
-      setCreating(false);
+      setEnrollBusy(false);
     }
   };
 
-  const copyToken = async () => {
-    if (!issued) return;
-    await copyText(issued.token);
+  const copyValue = async (value: string, label: string) => {
+    const ok = await copyText(value);
+    if (ok) toast.success(`已复制${label}`);
+    else toast.error('复制失败', '浏览器不允许访问剪贴板，请手动选中复制。');
   };
 
-  const copyText = async (value: string) => {
+  const runScan = async (scope: 'all' | 'machine', mode: ScanMode, machine?: Machine) => {
+    if (scope === 'all') {
+      const ok = await confirm({
+        title: `对全部机器的所有挂载点执行${modeLabel(mode)}扫描？`,
+        description: '已有排队中或进行中任务的挂载点会被自动跳过，不会打断正在运行的巡检。',
+        confirmText: '开始扫描',
+      });
+      if (!ok) return;
+    }
+    const key = scope === 'all' ? `all-${mode}` : `machine-${machine?.id}-${mode}`;
+    setPending(key);
     try {
-      await navigator.clipboard.writeText(value);
-    } catch {
-      // 剪贴板不可用时用户可手动选中复制
+      const result = await api<BulkScanResult>('/api/v1/scans', {
+        method: 'POST',
+        body: JSON.stringify({
+          mode,
+          ...(scope === 'machine' ? { machine_pk: machine?.id } : {}),
+        }),
+      });
+      const parts: string[] = [];
+      if (result.total_mounts === 0) parts.push('没有匹配的挂载点');
+      else parts.push(`已创建 ${result.created.length} 个任务`);
+      if (result.skipped.length > 0) parts.push(`跳过 ${result.skipped.length} 个`);
+      toast.success(`${modeLabel(mode)}扫描已提交`, parts.join(' · '));
+      reload();
+    } catch (err) {
+      toast.error('提交扫描失败', (err as Error).message);
+    } finally {
+      setPending(null);
     }
   };
 
   const issueAccessToken = async (machine: Machine) => {
-    if (
-      !window.confirm(
-        `重新生成机器「${machine.machine_id}」的接入 token？\n旧 token 将立即失效，旧 agent 会掉线；token 只显示这一次。`,
-      )
-    ) {
-      return;
-    }
-    setActionError(null);
-    setRotating(machine.id);
+    const ok = await confirm({
+      title: `重新生成机器「${machine.machine_id}」的接入 token？`,
+      description: '旧 token 会立即失效，仍在运行的旧 agent 会掉线；新 token 只显示这一次。',
+      confirmText: '生成 token',
+      tone: 'danger',
+    });
+    if (!ok) return;
+    setPending(`token-${machine.id}`);
     try {
       const result = await api<AgentAccessTokenResult>(`/api/v1/machines/${machine.id}/token`, {
         method: 'POST',
       });
       setAccessToken(result);
     } catch (err) {
-      setActionError((err as Error).message);
+      toast.error('生成接入 token 失败', (err as Error).message);
     } finally {
-      setRotating(null);
-    }
-  };
-
-  const scanTarget = async (
-    scope: 'all' | 'machine' | 'mount',
-    mode: ScanMode,
-    machine?: Machine,
-    mount?: MountRef,
-  ) => {
-    const label = mode === 'incremental' ? '增量' : '全量';
-    if (scope === 'all') {
-      if (!window.confirm(`确认对全部机器的所有挂载点执行${label}扫描？`)) return;
-    } else if (scope === 'machine') {
-      if (!window.confirm(`确认对机器「${machine?.machine_id}」的所有挂载点执行${label}扫描？`)) return;
-    }
-    const key =
-      scope === 'all'
-        ? `all-${mode}`
-        : scope === 'machine'
-          ? `machine-${machine!.id}-${mode}`
-          : `mount-${mount!.id}-${mode}`;
-    setScanning(key);
-    setScanMessage(null);
-    setActionError(null);
-    try {
-      const body: Record<string, unknown> = { mode };
-      if (scope === 'machine') body.machine_pk = machine!.id;
-      if (scope === 'mount') body.mount_pk = mount!.id;
-      const result = await api<BulkScanResult>('/api/v1/scans', {
-        method: 'POST',
-        body: JSON.stringify(body),
-      });
-      const parts: string[] = [];
-      if (result.total_mounts === 0) {
-        parts.push('没有匹配的挂载点');
-      } else {
-        parts.push(`已创建 ${result.created.length} 个任务`);
-      }
-      if (result.skipped.length > 0) {
-        parts.push(`跳过 ${result.skipped.length} 个（已有活跃任务）`);
-      }
-      setScanMessage(`扫描模式：${result.mode === 'incremental' ? '增量' : '全量'} · ${parts.join(' · ')}`);
-      load();
-    } catch (err) {
-      setActionError((err as Error).message);
-    } finally {
-      setScanning(null);
+      setPending(null);
     }
   };
 
   const removeMachine = async (machine: Machine) => {
-    if (
-      !window.confirm(
-        `删除机器「${machine.machine_id}」及其全部挂载点与巡检数据？\n此操作不可恢复；删除后该 agent 需要重新注册。`,
-      )
-    ) {
-      return;
-    }
-    setDeleting(`machine-${machine.id}`);
-    setActionError(null);
+    const ok = await confirm({
+      title: '删除机器及其巡检数据？',
+      description: `机器「${machine.machine_id}」的挂载点、文件记录、异常与任务都会被删除，且不可恢复。该 agent 需要重新注册才能接入。`,
+      confirmText: '删除机器',
+      tone: 'danger',
+      requireText: machine.machine_id,
+      inputLabel: `输入机器 ID「${machine.machine_id}」以确认`,
+    });
+    if (!ok) return;
+    setPending(`delete-${machine.id}`);
     try {
       await api(`/api/v1/machines/${machine.id}`, { method: 'DELETE' });
-      load();
+      toast.success('已删除机器', machine.machine_id);
+      reload();
     } catch (err) {
-      setActionError((err as Error).message);
+      toast.error('删除失败', (err as Error).message);
     } finally {
-      setDeleting(null);
+      setPending(null);
     }
   };
 
-  const removeMount = async (machine: Machine, mount: MountRef) => {
-    if (
-      !window.confirm(
-        `删除挂载点「${machine.machine_id}/${mount.mount_id}」及其巡检数据？\n此操作不可恢复；重新添加需要重新注册该挂载点。`,
-      )
-    ) {
-      return;
-    }
-    setDeleting(`mount-${mount.id}`);
-    setActionError(null);
-    try {
-      await api(`/api/v1/mounts/${mount.id}`, { method: 'DELETE' });
-      load();
-    } catch (err) {
-      setActionError((err as Error).message);
-    } finally {
-      setDeleting(null);
-    }
-  };
+  if (!machines && error) {
+    return (
+      <div className="alert alert-danger" role="alert">
+        加载机器列表失败：{error.message}
+      </div>
+    );
+  }
+  if (!machines) return <PageLoading />;
 
-  if (error) return <div className="error">{error}</div>;
-  if (!machines) return <div className="muted">加载中…</div>;
+  const totalMounts = machines.reduce((sum, machine) => sum + machine.mounts.length, 0);
+  const scanning = pending !== null;
 
   return (
     <>
-      <div className="toolbar" style={{ justifyContent: 'space-between' }}>
-        <h1>机器与挂载点</h1>
-        <div className="toolbar">
-          <button
-            className="primary"
-            type="button"
-            disabled={scanning !== null || !machines || machines.length === 0}
-            onClick={() => void scanTarget('all', 'incremental')}
-          >
-            {scanning === 'all-incremental' ? '扫描中…' : '全部机器增量扫描'}
-          </button>
-          <button
-            className="primary"
-            type="button"
-            disabled={scanning !== null || !machines || machines.length === 0}
-            onClick={() => void scanTarget('all', 'full')}
-          >
-            {scanning === 'all-full' ? '扫描中…' : '全部机器全量扫描'}
-          </button>
-          <button className="primary" type="button" onClick={() => setShowTokenForm((value) => !value)}>
-            {showTokenForm ? '收起' : '注册新机器'}
-          </button>
-        </div>
-      </div>
+      <PageHeader
+        title="机器与挂载点"
+        subtitle={`${machines.length} 台机器 · ${totalMounts} 个挂载点${
+          lastUpdatedAt ? ` · 更新于 ${formatTime(lastUpdatedAt)}` : ''
+        }`}
+        actions={
+          <>
+            <button
+              className="btn btn-primary"
+              type="button"
+              disabled={scanning || machines.length === 0}
+              onClick={() => void runScan('all', 'incremental')}
+            >
+              {pending === 'all-incremental' ? '提交中…' : '全部机器增量巡检'}
+            </button>
+            <button
+              className="btn"
+              type="button"
+              disabled={scanning || machines.length === 0}
+              onClick={() => void runScan('all', 'full')}
+            >
+              {pending === 'all-full' ? '提交中…' : '全部机器全量巡检'}
+            </button>
+            <button className="btn" type="button" onClick={() => setEnrollOpen(true)}>
+              注册新机器
+            </button>
+          </>
+        }
+      />
 
-      {scanMessage ? <div className="muted">{scanMessage}</div> : null}
-
-      {showTokenForm ? (
-        <div className="panel">
-          <h2>生成注册 token</h2>
-          <p className="muted">
-            注册 token 仅用于新节点首次注册，一次性；已有节点重连请用机器面板里的「获取接入 token」。
-          </p>
-          {issued ? (
-            <>
-              <p className="muted">
-                token 只显示这一次；把下面的值填入 agent 配置的 <code>agent.token</code>，然后启动 agent。
-              </p>
-              <pre className="code">{issued.token}</pre>
-              <div className="toolbar">
-                <button className="ghost" type="button" onClick={() => void copyToken()}>
-                  复制 token
-                </button>
-                <span className="muted">
-                  有效期至 {formatTime(issued.expires_at)}
-                  {issued.machine_hint ? ` · 机器提示 ${issued.machine_hint}` : ''}
-                </span>
-                <button className="ghost" type="button" onClick={() => setIssued(null)}>
-                  再生成一个
-                </button>
-              </div>
-            </>
-          ) : (
-            <>
-              <div className="toolbar">
-                <label>
-                  机器 ID 提示（可选）
-                  <input
-                    value={machineHint}
-                    onChange={(event) => setMachineHint(event.target.value)}
-                    placeholder="例如 nas-01"
-                  />
-                </label>
-                <label>
-                  有效期
-                  <select value={ttlHours} onChange={(event) => setTtlHours(Number(event.target.value))}>
-                    <option value={24}>24 小时</option>
-                    <option value={72}>72 小时</option>
-                    <option value={168}>7 天</option>
-                  </select>
-                </label>
-                <button className="primary" type="button" disabled={creating} onClick={() => void createToken()}>
-                  {creating ? '生成中…' : '生成 token'}
-                </button>
-              </div>
-              {formError ? <div className="error">{formError}</div> : null}
-              <p className="muted">机器 ID 提示只用于展示，agent 实际以配置中的 machine_id 注册。</p>
-            </>
-          )}
+      {error ? (
+        <div className="alert alert-warn" role="status" style={{ marginBottom: 12 }}>
+          刷新失败：{error.message}，当前显示上一次成功获取的数据。
         </div>
       ) : null}
 
-      {accessToken ? (
-        <div className="panel">
-          <div className="panel-header">
-            <h2>接入 token · {accessToken.machine_id}</h2>
-            <button className="ghost" type="button" onClick={() => setAccessToken(null)}>
-              关闭
-            </button>
-          </div>
-          <p className="muted">
-            长期有效，可多次使用；token 只显示这一次，重新生成后旧 token 立即失效。
-            在 agent GUI 首次配置里粘贴，点「识别已有节点」即可自动填充机器与挂载点。
-          </p>
-          <pre className="code">{accessToken.token}</pre>
-          <div className="toolbar">
-            <button className="ghost" type="button" onClick={() => void copyText(accessToken.token)}>
-              复制接入 token
-            </button>
-            <span className="muted">
-              agent {accessToken.agent_id} · 撤销旧 agent {accessToken.revoked_agents} 个
-            </span>
-          </div>
-        </div>
-      ) : null}
-
-      {actionError ? <div className="error">{actionError}</div> : null}
-      {machines.length === 0 ? <div className="muted">还没有 agent 注册</div> : null}
-      {machines.map((machine) => (
-        <div className="panel" key={machine.id}>
-          <div className="panel-header">
-            <h2>
-              {machine.label ?? machine.machine_id}{' '}
-              <span className="muted">
-                ({machine.machine_id} · {machine.status})
-              </span>
-            </h2>
-            <div className="panel-actions">
-              <button
-                className="ghost"
-                type="button"
-                disabled={scanning !== null}
-                onClick={() => void scanTarget('machine', 'incremental', machine)}
-              >
-                {scanning === `machine-${machine.id}-incremental` ? '扫描中…' : '整机增量'}
+      <div className="panel">
+        {machines.length === 0 ? (
+          <EmptyState
+            title="还没有 agent 注册"
+            description="生成一次性注册 token，在 agent 配置里填入后启动，机器与挂载点会自动出现。"
+            action={
+              <button className="btn btn-primary" type="button" onClick={() => setEnrollOpen(true)}>
+                注册新机器
               </button>
-              <button
-                className="ghost"
-                type="button"
-                disabled={scanning !== null}
-                onClick={() => void scanTarget('machine', 'full', machine)}
-              >
-                {scanning === `machine-${machine.id}-full` ? '扫描中…' : '整机全量'}
-              </button>
-              <Link className="ghost" to={`/files?machine_id=${encodeURIComponent(machine.machine_id)}`}>
-                文件
-              </Link>
-              <button
-                className="ghost"
-                type="button"
-                disabled={rotating === machine.id}
-                onClick={() => void issueAccessToken(machine)}
-              >
-                {rotating === machine.id ? '生成中…' : '获取接入 token'}
-              </button>
-              <button
-                className="ghost danger"
-                type="button"
-                disabled={deleting === `machine-${machine.id}`}
-                onClick={() => void removeMachine(machine)}
-              >
-                {deleting === `machine-${machine.id}` ? '删除中…' : '删除机器'}
-              </button>
-            </div>
-          </div>
-          <p className="muted">
-            {machine.hostname ?? '-'} · {machine.platform ?? '-'}/{machine.arch ?? '-'} · agent{' '}
-            {machine.agent_version ?? '-'} · 最后心跳 {formatRelative(machine.last_seen_at)}
-          </p>
-          {machine.mounts.length === 0 ? (
-            <div className="muted">没有挂载点</div>
-          ) : (
-            <table>
+            }
+          />
+        ) : (
+          <div className="table-wrap">
+            <table className="table table-wide">
               <thead>
                 <tr>
-                  <th>挂载点</th>
-                  <th>状态</th>
-                  <th>覆盖率</th>
-                  <th>清单版本</th>
-                  <th>操作</th>
+                  <th scope="col">机器</th>
+                  <th scope="col">状态</th>
+                  <th scope="col">最后心跳</th>
+                  <th scope="col">挂载点</th>
+                  <th scope="col">覆盖率</th>
+                  <th scope="col" className="num">
+                    未关闭异常
+                  </th>
+                  <th scope="col">操作</th>
                 </tr>
               </thead>
               <tbody>
-                {machine.mounts.map((mount) => (
-                  <tr key={mount.id}>
-                    <td>
-                      <Link to={`/mounts/${mount.id}`}>{mount.label ?? mount.mount_id}</Link>
-                      <div className="muted">
-                        {mount.mount_id} · {mount.state}
-                      </div>
-                    </td>
-                    <td>
-                      <span className={statusClass(mount.state)}>{mount.state}</span>
-                    </td>
-                    <td>
-                      {mount.coverage ? (
-                        <>
-                          <div className="bar">
-                            <span style={{ width: formatRatio(mount.coverage.ratio) }} />
-                          </div>
-                          <span className="muted">
-                            {mount.coverage.hashed}/{mount.coverage.total} ·{' '}
-                            {formatRatio(mount.coverage.ratio)}
-                          </span>
-                        </>
-                      ) : (
-                        '-'
-                      )}
-                    </td>
-                    <td>{mount.manifest_epoch}</td>
-                    <td>
-                      <button
-                        className="ghost"
-                        type="button"
-                        disabled={scanning !== null}
-                        onClick={() => void scanTarget('mount', 'incremental', machine, mount)}
-                      >
-                        {scanning === `mount-${mount.id}-incremental` ? '扫描中…' : '增量扫描'}
-                      </button>{' '}
-                      <button
-                        className="ghost"
-                        type="button"
-                        disabled={scanning !== null}
-                        onClick={() => void scanTarget('mount', 'full', machine, mount)}
-                      >
-                        {scanning === `mount-${mount.id}-full` ? '扫描中…' : '全量扫描'}
-                      </button>{' '}
-                      <Link to={`/files?mount_pk=${mount.id}`}>文件</Link>{' '}
-                      <button
-                        className="ghost danger"
-                        type="button"
-                        disabled={deleting === `mount-${mount.id}`}
-                        onClick={() => void removeMount(machine, mount)}
-                      >
-                        {deleting === `mount-${mount.id}` ? '删除中…' : '删除'}
-                      </button>
-                    </td>
-                  </tr>
-                ))}
+                {machines.map((machine) => {
+                  const coverage = machineCoverage(machine);
+                  return (
+                    <tr key={machine.id}>
+                      <td>
+                        <Link to={`/machines/${machine.id}`}>
+                          <strong>{machine.label ?? machine.machine_id}</strong>
+                        </Link>
+                        <div className="cell-sub">
+                          {machine.label && machine.label !== machine.machine_id
+                            ? `${machine.machine_id} · `
+                            : ''}
+                          {machine.hostname ?? '—'} · {machine.platform ?? '—'}/
+                          {machine.arch ?? '—'}
+                        </div>
+                        <div className="cell-sub">agent {machine.agent_version ?? '—'}</div>
+                      </td>
+                      <td>
+                        <StatusBadge value={machine.status} map={machineStatus} />
+                      </td>
+                      <td title={formatTime(machine.last_seen_at)}>
+                        {machine.last_seen_at ? formatRelative(machine.last_seen_at) : '从未上线'}
+                      </td>
+                      <td>
+                        {formatCount(machine.mounts.length)} 个
+                        <div className="cell-sub">{mountSummary(machine)}</div>
+                      </td>
+                      <td style={{ minWidth: 140 }}>
+                        {coverage.ratio !== null ? (
+                          <ProgressBar
+                            value={coverage.ratio}
+                            label={`${machine.machine_id} 覆盖率`}
+                            showValue
+                          />
+                        ) : (
+                          <span className="muted">—</span>
+                        )}
+                      </td>
+                      <td className="num">
+                        {machine.open_issues !== undefined ? (
+                          <Link
+                            to={`/issues?status=open&machine_id=${encodeURIComponent(machine.machine_id)}`}
+                          >
+                            {formatCount(machine.open_issues)}
+                          </Link>
+                        ) : (
+                          '—'
+                        )}
+                      </td>
+                      <td>
+                        <div className="row-actions">
+                          <Menu
+                            label="操作"
+                            items={[
+                              { label: '查看详情', to: `/machines/${machine.id}` },
+                              {
+                                label: '整机增量巡检',
+                                onSelect: () => void runScan('machine', 'incremental', machine),
+                                disabled: scanning,
+                              },
+                              {
+                                label: '整机全量巡检',
+                                onSelect: () => void runScan('machine', 'full', machine),
+                                disabled: scanning,
+                              },
+                              {
+                                label: '获取接入 token',
+                                onSelect: () => void issueAccessToken(machine),
+                                disabled: scanning,
+                              },
+                              {
+                                label: '删除机器',
+                                onSelect: () => void removeMachine(machine),
+                                danger: true,
+                                disabled: scanning,
+                              },
+                            ]}
+                          />
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
-          )}
-        </div>
-      ))}
+          </div>
+        )}
+      </div>
+
+      <Modal
+        open={enrollOpen}
+        title="注册新机器"
+        subtitle="注册 token 仅用于新节点首次注册，一次性使用"
+        onClose={closeEnroll}
+        footer={
+          issued ? (
+            <>
+              <button className="btn" type="button" onClick={() => void copyValue(issued.token, '注册 token')}>
+                复制 token
+              </button>
+              <button
+                className="btn"
+                type="button"
+                onClick={() => {
+                  setIssued(null);
+                  setMachineHint('');
+                }}
+              >
+                再生成一个
+              </button>
+              <button className="btn btn-primary" type="button" onClick={closeEnroll}>
+                完成
+              </button>
+            </>
+          ) : (
+            <>
+              <button className="btn" type="button" onClick={closeEnroll}>
+                取消
+              </button>
+              <button
+                className="btn btn-primary"
+                type="button"
+                disabled={enrollBusy}
+                onClick={() => void createEnrollToken()}
+              >
+                {enrollBusy ? '生成中…' : '生成 token'}
+              </button>
+            </>
+          )
+        }
+      >
+        {issued ? (
+          <div className="stack">
+            <div className="alert alert-warn">
+              token 只显示这一次。把它填入 agent 配置的 <code>agent.token</code> 后启动 agent。
+            </div>
+            <pre className="code-block" style={{ maxHeight: 120 }}>
+              {issued.token}
+            </pre>
+            <div className="muted" style={{ fontSize: 'var(--text-xs)' }}>
+              有效期至 {formatTime(issued.expires_at)}
+              {issued.machine_hint ? ` · 机器提示 ${issued.machine_hint}` : ''}
+            </div>
+          </div>
+        ) : (
+          <div className="stack">
+            <label className="field">
+              <span className="field-label">机器 ID 提示（可选）</span>
+              <input
+                className="input"
+                value={machineHint}
+                onChange={(event) => setMachineHint(event.target.value)}
+                placeholder="例如 nas-01"
+                autoComplete="off"
+              />
+              <span>仅用于展示，agent 实际以配置中的 machine_id 注册。</span>
+            </label>
+            <label className="field">
+              <span className="field-label">有效期</span>
+              <select
+                className="select"
+                value={String(ttlHours)}
+                onChange={(event) => setTtlHours(Number(event.target.value))}
+              >
+                {TTL_OPTIONS.map((option) => (
+                  <option key={option.hours} value={String(option.hours)}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+        )}
+      </Modal>
+
+      <Modal
+        open={accessToken !== null}
+        title="接入 token"
+        subtitle={accessToken ? `机器 ${accessToken.machine_id}` : undefined}
+        onClose={() => setAccessToken(null)}
+        footer={
+          <>
+            <button
+              className="btn"
+              type="button"
+              onClick={() => accessToken && void copyValue(accessToken.token, '接入 token')}
+            >
+              复制接入 token
+            </button>
+            <button className="btn btn-primary" type="button" onClick={() => setAccessToken(null)}>
+              关闭
+            </button>
+          </>
+        }
+      >
+        {accessToken ? (
+          <div className="stack">
+            <div className="alert alert-info">
+              长期有效、可多次使用。token 只显示这一次；重新生成后旧 token 立即失效。在 agent GUI
+              首次配置里粘贴，点「识别已有节点」即可自动填充机器与挂载点。
+            </div>
+            <pre className="code-block" style={{ maxHeight: 120 }}>
+              {accessToken.token}
+            </pre>
+            <div className="muted" style={{ fontSize: 'var(--text-xs)' }}>
+              agent #{accessToken.agent_id} · 已撤销旧 agent {accessToken.revoked_agents} 个
+            </div>
+          </div>
+        ) : null}
+      </Modal>
     </>
   );
 }

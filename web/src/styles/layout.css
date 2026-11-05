@@ -1,0 +1,350 @@
+/* 应用外壳与响应式布局 */
+.app-shell {
+  display: grid;
+  grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
+  align-content: start;
+  min-height: 100vh;
+}
+
+.sidebar {
+  position: sticky;
+  top: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  height: 100vh;
+  padding: 18px 14px;
+  overflow-y: auto;
+  background: var(--sidebar-bg);
+  color: var(--sidebar-text);
+}
+
+.sidebar-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 6px;
+  color: #ffffff;
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+}
+
+.sidebar-brand img {
+  flex: none;
+  width: 28px;
+  height: 28px;
+}
+
+.sidebar-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.nav-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.nav-group-title {
+  padding: 0 10px 4px;
+  color: var(--sidebar-title);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+}
+
+.nav-link {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  color: var(--sidebar-text);
+  font-size: var(--text-sm);
+  text-decoration: none;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+.nav-link:hover {
+  background: var(--sidebar-hover);
+  color: #ffffff;
+  text-decoration: none;
+}
+
+.nav-link[aria-current='page'] {
+  background: #1f2937;
+  color: #ffffff;
+  font-weight: 600;
+}
+
+.nav-link svg {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  opacity: 0.85;
+}
+
+.nav-badge {
+  min-width: 20px;
+  margin-left: auto;
+  padding: 0 6px;
+  border-radius: var(--radius-full);
+  background: rgba(239, 68, 68, 0.18);
+  color: #fca5a5;
+  font-size: 11px;
+  line-height: 18px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.sidebar-footer {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: auto;
+  padding-top: 12px;
+  border-top: 1px solid var(--sidebar-border);
+  color: var(--sidebar-title);
+  font-size: var(--text-xs);
+}
+
+.sidebar-health {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.sidebar-footer .btn {
+  justify-content: flex-start;
+  background: transparent;
+  border-color: var(--sidebar-border);
+  color: var(--sidebar-text);
+}
+
+.sidebar-footer .btn:hover:not(:disabled) {
+  background: var(--sidebar-hover);
+  border-color: var(--sidebar-border);
+  color: #ffffff;
+}
+
+.main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.content {
+  width: 100%;
+  max-width: var(--content-max);
+  padding: 24px 28px 48px;
+}
+
+.page-loading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 40px 8px;
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+}
+
+.boot {
+  display: grid;
+  min-height: 100vh;
+  place-items: center;
+  gap: 10px;
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+}
+
+.boot img {
+  width: 56px;
+  height: 56px;
+}
+
+/* 登录页 */
+.login-page {
+  display: grid;
+  min-height: 100vh;
+  padding: 24px;
+  place-items: center;
+  background:
+    radial-gradient(circle at 30% 15%, #eef4ff, transparent 55%),
+    var(--color-bg);
+}
+
+.login-card {
+  width: min(360px, 100%);
+}
+
+.login-logo {
+  display: block;
+  width: 56px;
+  height: 56px;
+  margin: 2px auto 12px;
+}
+
+.login-title {
+  font-size: var(--text-xl);
+  text-align: center;
+}
+
+.login-sub {
+  margin: 4px 0 20px;
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+  text-align: center;
+}
+
+.login-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.login-hint {
+  margin-top: 14px;
+  color: var(--color-text-subtle);
+  font-size: var(--text-xs);
+  text-align: center;
+}
+
+/* 通用栅格 */
+.split {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-3);
+}
+
+.split-3 {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-3);
+}
+
+@media (max-width: 1180px) {
+  .app-shell {
+    grid-template-columns: 208px minmax(0, 1fr);
+  }
+
+  .content {
+    padding: 20px 20px 40px;
+  }
+}
+
+@media (max-width: 900px) {
+  .app-shell {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .sidebar {
+    position: sticky;
+    top: 0;
+    z-index: 20;
+    flex-direction: row;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    height: auto;
+    padding: 8px 12px;
+    overflow: visible;
+  }
+
+  .sidebar-brand {
+    flex: none;
+    padding: 0;
+    font-size: 15px;
+  }
+
+  .sidebar-brand img {
+    width: 22px;
+    height: 22px;
+  }
+
+  .sidebar-nav {
+    flex: 1;
+    flex-direction: row;
+    gap: 4px;
+    min-width: 0;
+    margin: 0;
+    overflow-x: auto;
+  }
+
+  .nav-group {
+    flex-direction: row;
+    gap: 2px;
+  }
+
+  .nav-group-title,
+  .nav-link svg,
+  .nav-badge {
+    display: none;
+  }
+
+  .nav-link {
+    padding: 6px 8px;
+    font-size: var(--text-xs);
+    white-space: nowrap;
+  }
+
+  .sidebar-footer {
+    flex: none;
+    flex-direction: row;
+    align-items: center;
+    gap: 8px;
+    margin: 0;
+    padding: 0;
+    border: 0;
+  }
+
+  .sidebar-health {
+    display: none;
+  }
+
+  .sidebar-footer .btn {
+    height: 28px;
+    padding: 0 8px;
+    font-size: var(--text-xs);
+  }
+
+  .content {
+    padding: 14px 14px 40px;
+  }
+
+  .split,
+  .split-3 {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .drawer {
+    width: 100%;
+  }
+
+  .modal-overlay {
+    padding: 6vh 12px 12px;
+  }
+}
+
+@media (max-width: 560px) {
+  .filter-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .kpi-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .kpi-value {
+    font-size: 22px;
+  }
+
+  .page-header {
+    align-items: stretch;
+  }
+
+  .page-actions {
+    width: 100%;
+  }
+}

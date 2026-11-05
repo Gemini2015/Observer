@@ -1,37 +1,117 @@
-export class UnauthorizedError extends Error {
-  constructor() {
-    super('unauthorized');
-    this.name = 'UnauthorizedError';
+export class ApiError extends Error {
+  readonly status: number;
+  readonly kind: string;
+  /** 服务端原始 detail（可能为英文），用于「技术信息」折叠展示。 */
+  readonly detail?: string;
+
+  constructor(status: number, kind: string, message: string, detail?: string) {
+    super(message);
+    this.name = 'ApiError';
+    this.status = status;
+    this.kind = kind;
+    this.detail = detail;
   }
+}
+
+function friendlyMessage(status: number, detail: string | undefined): string {
+  switch (status) {
+    case 400:
+      return '请求参数不合法';
+    case 401:
+      return '登录已过期，请重新登录';
+    case 403:
+      return '没有权限执行该操作';
+    case 404:
+      return '目标不存在或已被删除';
+    case 409:
+      return detail ? `操作冲突：${detail}` : '操作冲突，目标状态已变化';
+    case 410:
+      return '该操作已过期，请刷新后重试';
+    case 422:
+      return detail ? `参数校验失败：${detail}` : '参数校验失败';
+    case 429:
+      return '操作过于频繁，请稍后再试';
+    default:
+      return status >= 500 ? '服务端错误，请稍后重试' : `请求失败（HTTP ${status}）`;
+  }
+}
+
+function networkError(): ApiError {
+  return new ApiError(0, 'network', '无法连接中心服，请检查网络或 hub 是否在运行', 'network error');
+}
+
+async function toApiError(response: Response): Promise<ApiError> {
+  let detail: string | undefined;
+  let title: string | undefined;
+  try {
+    const payload = (await response.json()) as { detail?: string; title?: string };
+    detail = payload.detail;
+    title = payload.title;
+  } catch {
+    // 非 JSON 错误体
+  }
+  const raw = detail ?? title ?? response.statusText;
+  return new ApiError(response.status, title ?? 'request', friendlyMessage(response.status, detail), raw);
+}
+
+function handleUnauthorized(): void {
+  window.dispatchEvent(new Event('observer:unauthorized'));
 }
 
 export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   const headers = new Headers(init.headers);
-  if (init.body && !headers.has('content-type')) {
+  if (init.body && !(init.body instanceof FormData) && !headers.has('content-type')) {
     headers.set('content-type', 'application/json');
   }
 
-  const response = await fetch(path, { credentials: 'include', ...init, headers });
+  let response: Response;
+  try {
+    response = await fetch(path, { credentials: 'include', ...init, headers });
+  } catch (error) {
+    if ((error as { name?: string } | null)?.name === 'AbortError') throw error;
+    throw networkError();
+  }
 
   if (response.status === 401) {
-    window.dispatchEvent(new Event('observer:unauthorized'));
-    throw new UnauthorizedError();
+    handleUnauthorized();
+    throw new ApiError(401, 'auth', '登录已过期，请重新登录', 'unauthorized');
   }
   if (!response.ok) {
-    let detail = response.statusText;
-    try {
-      const payload = (await response.json()) as { detail?: string; title?: string };
-      detail = payload.detail ?? payload.title ?? detail;
-    } catch {
-      // ignore non-json error bodies
-    }
-    throw new Error(detail);
+    throw await toApiError(response);
   }
   if (response.status === 204) {
     return undefined as T;
   }
   return (await response.json()) as T;
 }
+
+/** 下载文件（CSV 导出）：与 api 共享错误处理，返回是否被截断。 */
+export async function downloadFile(path: string, filename: string): Promise<{ truncated: boolean }> {
+  let response: Response;
+  try {
+    response = await fetch(path, { credentials: 'include' });
+  } catch (error) {
+    if ((error as { name?: string } | null)?.name === 'AbortError') throw error;
+    throw networkError();
+  }
+  if (response.status === 401) {
+    handleUnauthorized();
+    throw new ApiError(401, 'auth', '登录已过期，请重新登录', 'unauthorized');
+  }
+  if (!response.ok) {
+    throw await toApiError(response);
+  }
+  const blob = await response.blob();
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = filename;
+  anchor.click();
+  URL.revokeObjectURL(url);
+  return { truncated: response.headers.get('x-observer-truncated') === 'true' };
+}
+
+// ---------------------------------------------------------------- 类型定义
 
 export interface Coverage {
   total: number;
@@ -60,6 +140,9 @@ export interface Machine {
   agent_version?: string | null;
   agent_protocol?: number | null;
   mounts: MountRef[];
+  /** 新增（后端增量）：未关闭异常数与最近任务时间。 */
+  open_issues?: number;
+  last_job_at?: number | null;
 }
 
 export interface Job {
@@ -127,15 +210,28 @@ export interface BulkScanResult {
   skipped: BulkScanSkipped[];
 }
 
+export interface AttentionMount {
+  mount_pk: number;
+  mount_id: string;
+  machine_id: string;
+  state: string;
+  coverage_ratio: number;
+  last_job_at: number | null;
+  last_job_status: string | null;
+}
+
 export interface Overview {
   machines: { total: number; online: number };
-  mounts: { total: number };
+  mounts: { total: number; never_scanned?: number; stale_24h?: number };
   coverage: Coverage;
-  issues: { open: number; acked: number };
+  issues: { open: number; acked: number; ignored?: number; resolved?: number };
   issues_by_type: { mismatch: number; missing: number; unreadable: number };
   issues_by_machine: Array<{ machine_id: string; open: number }>;
   jobs: { pending: number; running: number };
   recent_jobs: Job[];
+  /** 后端增量字段；未就绪时前端按缺省处理。 */
+  last_scan_at?: number | null;
+  attention_mounts?: AttentionMount[];
 }
 
 export interface MountDetail extends MountRef {
@@ -296,96 +392,34 @@ export interface RepairView {
   finished_at: number | null;
 }
 
-export function formatTime(value?: number | null): string {
-  if (!value) return '-';
-  return new Date(value).toLocaleString();
+export interface IssueSummary {
+  status: { open: number; acked: number; ignored: number; resolved: number };
+  type: { mismatch: number; missing: number; unreadable: number };
+  machines: Array<{ machine_id: string; open: number }>;
 }
 
-export function formatRelative(value?: number | null): string {
-  if (!value) return '-';
-  const diff = Date.now() - value;
-  if (diff < 60_000) return '刚刚';
-  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)} 分钟前`;
-  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)} 小时前`;
-  return new Date(value).toLocaleString();
+export interface SystemInfo {
+  version: string;
+  now: number;
+  uptime_ms: number;
+  scheduler: { enabled: boolean; interval_ms: number };
+  offline_after_seconds: number;
+  db: {
+    ok: boolean;
+    machines: number;
+    mounts: number;
+    paths: number;
+    issues_open: number;
+    jobs_running: number;
+    repairs_active: number;
+  };
 }
 
-export function formatRatio(ratio: number): string {
-  return `${(ratio * 100).toFixed(1)}%`;
+export interface AuditEntry {
+  id: number;
+  actor: string;
+  action: string;
+  target: string | null;
+  detail: unknown;
+  at: number;
 }
-
-export function formatBytes(value?: number | null): string {
-  const size = Number(value ?? 0);
-  if (!Number.isFinite(size) || size <= 0) return '0 B';
-  const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB'];
-  let index = 0;
-  let current = size;
-  while (current >= 1024 && index < units.length - 1) {
-    current /= 1024;
-    index += 1;
-  }
-  return `${current.toFixed(index === 0 ? 0 : 1)} ${units[index]}`;
-}
-
-/** mtime_ns 是十进制纳秒字符串，用 BigInt 转毫秒避免精度丢失。 */
-export function formatNs(value?: string | null): string {
-  if (!value) return '-';
-  try {
-    return new Date(Number(BigInt(value) / 1_000_000n)).toLocaleString();
-  } catch {
-    return value;
-  }
-}
-
-export function fileStateLabel(state: string): string {
-  switch (state) {
-    case 'active':
-      return '正常';
-    case 'missing':
-      return '缺失';
-    case 'out_of_scope':
-      return '已移出规则';
-    default:
-      return state;
-  }
-}
-
-export function decodePath(base64: string): string {
-  try {
-    const bytes = Uint8Array.from(atob(base64), (char) => char.charCodeAt(0));
-    return new TextDecoder().decode(bytes);
-  } catch {
-    return base64;
-  }
-}
-
-export function statusClass(status: string): string {
-  switch (status) {
-    case 'completed':
-    case 'active':
-    case 'online':
-      return 'badge ok';
-    case 'running':
-    case 'pending':
-    case 'suspect':
-      return 'badge warn';
-    case 'failed':
-    case 'unavailable':
-    case 'open':
-      return 'badge danger';
-    default:
-      return 'badge';
-  }
-}
-
-export function issueClass(type: string): string {
-  switch (type) {
-    case 'mismatch':
-      return 'badge danger';
-    case 'missing':
-      return 'badge warn';
-    default:
-      return 'badge';
-  }
-}
-

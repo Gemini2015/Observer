@@ -2,18 +2,36 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import {
   api,
-  decodePath,
-  fileStateLabel,
-  formatBytes,
-  formatNs,
-  formatTime,
+  downloadFile,
   type FileDetail,
   type FileItem,
   type FileList,
   type Machine,
 } from '../api';
+import { EmptyState } from '../components/EmptyState';
+import { Drawer } from '../components/Drawer';
+import { JsonDetails, KeyValue } from '../components/KeyValue';
+import { Pagination } from '../components/Pagination';
+import { PageHeader } from '../components/PageHeader';
+import { PageLoading } from '../components/PageLoading';
+import { StatusBadge } from '../components/StatusBadge';
+import { useToast } from '../components/Toast';
+import { copyText } from '../lib/clipboard';
+import {
+  decodePath,
+  formatBytes,
+  formatCount,
+  formatNs,
+  formatRelative,
+  formatTime,
+  joinMountPath,
+  shortHash,
+} from '../lib/format';
+import { useDebouncedValue, useDocumentTitle, usePolling } from '../lib/hooks';
+import { confidence, fileState, hashKind, issueStatus, issueType, labelOf, observationKind } from '../lib/labels';
 
-interface Filters {  q: string;
+interface Filters {
+  q: string;
   machineId: string;
   mountPk: string;
   state: string;
@@ -27,7 +45,29 @@ interface Filters {  q: string;
   pageSize: number;
 }
 
-const PAGE_SIZES = [50, 100];
+const PAGE_SIZES = [25, 50, 100];
+const SORT_OPTIONS = [
+  { value: 'path', label: '路径' },
+  { value: 'size', label: '大小' },
+  { value: 'last_seen', label: '最后发现' },
+  { value: 'last_hashed', label: '最后哈希' },
+  { value: 'state', label: '状态' },
+];
+
+const DEFAULT_FILTERS: Filters = {
+  q: '',
+  machineId: '',
+  mountPk: '',
+  state: '',
+  issue: '',
+  hash: '',
+  sizeMin: '',
+  sizeMax: '',
+  sort: 'path',
+  order: 'asc',
+  page: 1,
+  pageSize: 50,
+};
 
 function readFilters(params: URLSearchParams): Filters {
   const page = Number(params.get('page') ?? '1');
@@ -48,7 +88,7 @@ function readFilters(params: URLSearchParams): Filters {
   };
 }
 
-function toSearchParams(filters: Filters): URLSearchParams {
+function toParams(filters: Filters): URLSearchParams {
   const params = new URLSearchParams();
   if (filters.q) params.set('q', filters.q);
   if (filters.machineId) params.set('machine_id', filters.machineId);
@@ -82,39 +122,312 @@ function toApiParams(filters: Filters, overrideLimit?: number): URLSearchParams 
   return params;
 }
 
-function fullPath(detail: FileDetail): string {
-  const base = detail.mount.physical_path.replace(/[\\/]+$/, '');
-  const relative = detail.file.path_key.replace(/\//g, '\\');
-  return base ? `${base}\\${relative}` : relative;
+function hasActiveFilters(filters: Filters): boolean {
+  return Boolean(
+    filters.q ||
+      filters.machineId ||
+      filters.mountPk ||
+      filters.state ||
+      filters.issue ||
+      filters.hash ||
+      filters.sizeMin ||
+      filters.sizeMax,
+  );
 }
 
-function stateClass(state: string): string {
-  if (state === 'active') return 'badge ok';
-  if (state === 'missing') return 'badge danger';
-  return 'badge warn';
-}
+function FileDetailDrawer({
+  detail,
+  error,
+  onClose,
+}: {
+  detail: FileDetail | null;
+  error: Error | null;
+  onClose: () => void;
+}) {
+  const toast = useToast();
+  const copyValue = async (value: string, label: string) => {
+    const ok = await copyText(value);
+    if (ok) toast.success(`已复制${label}`);
+    else toast.error('复制失败', '浏览器不允许访问剪贴板，请手动选中复制。');
+  };
 
-async function copyText(value: string): Promise<void> {
-  try {
-    await navigator.clipboard.writeText(value);
-  } catch {
-    // 剪贴板不可用时用户可手动选中
-  }
+  const file = detail?.file;
+  const fullPath = detail && file ? joinMountPath(detail.machine.platform, detail.mount.physical_path, file.path_key) : '';
+
+  return (
+    <Drawer
+      open
+      title={file ? decodePath(file.path_display_b64) : '文件详情'}
+      subtitle={detail ? `${detail.machine.machine_id} / ${detail.mount.mount_id}` : undefined}
+      onClose={onClose}
+      footer={
+        <>
+          <button className="btn" type="button" onClick={onClose}>
+            关闭
+          </button>
+          {fullPath ? (
+            <button className="btn btn-primary" type="button" onClick={() => void copyValue(fullPath, '完整路径')}>
+              复制完整路径
+            </button>
+          ) : null}
+        </>
+      }
+    >
+      {error ? <div className="alert alert-danger">{error.message}</div> : null}
+      {!detail && !error ? <PageLoading /> : null}
+      {detail && file ? (
+        <>
+          <section>
+            <div className="panel-title" style={{ marginBottom: 8 }}>
+              位置
+            </div>
+            <KeyValue
+              items={[
+                {
+                  label: '完整路径',
+                  value: (
+                    <div className="row">
+                      <span className="mono">{fullPath}</span>
+                      <button
+                        className="btn btn-sm"
+                        type="button"
+                        onClick={() => void copyValue(fullPath, '完整路径')}
+                      >
+                        复制
+                      </button>
+                    </div>
+                  ),
+                },
+                {
+                  label: '相对路径',
+                  value: <span className="mono">{file.path_key}</span>,
+                },
+                { label: '机器', value: <Link to="/machines">{detail.machine.machine_id}</Link> },
+                { label: '挂载点', value: <Link to={`/mounts/${detail.mount.id}`}>{detail.mount.label ?? detail.mount.mount_id}</Link> },
+              ]}
+            />
+          </section>
+
+          <section>
+            <div className="panel-title" style={{ marginBottom: 8 }}>
+              状态
+            </div>
+            <KeyValue
+              items={[
+                { label: '文件状态', value: <StatusBadge value={file.state} map={fileState} /> },
+                { label: '大小', value: formatBytes(file.size) },
+                { label: 'mtime', value: formatNs(file.mtime_ns) },
+                { label: '最后发现', value: formatTime(file.last_seen_at) },
+                { label: '最后哈希', value: formatTime(file.last_hashed_at) },
+                {
+                  label: '哈希类型',
+                  value: file.last_hash_kind ? (
+                    <StatusBadge value={file.last_hash_kind} map={hashKind} dot={false} />
+                  ) : (
+                    '—'
+                  ),
+                },
+              ]}
+            />
+          </section>
+
+          <section>
+            <div className="section-title">
+              <h3>SHA-256</h3>
+              {file.content_hash ? (
+                <button
+                  className="btn btn-sm"
+                  type="button"
+                  onClick={() => void copyValue(file.content_hash ?? '', '哈希')}
+                >
+                  复制哈希
+                </button>
+              ) : null}
+            </div>
+            <div className="mono">{file.content_hash ?? '尚未计算哈希'}</div>
+          </section>
+
+          <section>
+            <div className="section-title">
+              <h3>异常（{detail.issues.length}）</h3>
+              <Link
+                className="btn btn-sm"
+                to={`/issues?machine_id=${encodeURIComponent(detail.machine.machine_id)}&q=${encodeURIComponent(file.path_key)}`}
+              >
+                在异常页查看
+              </Link>
+            </div>
+            {detail.issues.length === 0 ? (
+              <div className="muted">没有异常记录。</div>
+            ) : (
+              <div className="table-wrap">
+                <table className="table table-compact">
+                  <thead>
+                    <tr>
+                      <th scope="col">类型</th>
+                      <th scope="col">状态</th>
+                      <th scope="col">置信度</th>
+                      <th scope="col" className="num">
+                        次数
+                      </th>
+                      <th scope="col">最近</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {detail.issues.map((issue) => (
+                      <tr key={issue.id}>
+                        <td>
+                          <StatusBadge value={issue.type} map={issueType} />
+                        </td>
+                        <td>
+                          <StatusBadge value={issue.status} map={issueStatus} />
+                        </td>
+                        <td>
+                          <StatusBadge value={issue.confidence} map={confidence} dot={false} />
+                        </td>
+                        <td className="num">{formatCount(issue.occurrences)}</td>
+                        <td title={formatTime(issue.last_seen_at)}>
+                          {formatRelative(issue.last_seen_at)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+            {detail.issues.some((issue) => issue.evidence) ? (
+              <JsonDetails
+                value={detail.issues.map((issue) => ({ id: issue.id, evidence: issue.evidence }))}
+                summary="查看异常证据（原始 JSON）"
+              />
+            ) : null}
+          </section>
+
+          <section>
+            <div className="panel-title" style={{ marginBottom: 8 }}>
+              最近观测（{detail.observations.length}）
+            </div>
+            {detail.observations.length === 0 ? (
+              <div className="muted">暂无观测记录。</div>
+            ) : (
+              <div className="table-wrap">
+                <table className="table table-compact">
+                  <thead>
+                    <tr>
+                      <th scope="col">哈希</th>
+                      <th scope="col">类型</th>
+                      <th scope="col">时间</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {detail.observations.map((observation, index) => (
+                      <tr key={`${observation.hash}-${index}`}>
+                        <td className="mono" title={observation.hash}>
+                          {shortHash(observation.hash, 16)}
+                        </td>
+                        <td>{labelOf(observationKind, observation.kind).label}</td>
+                        <td>{formatTime(observation.observed_at)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </section>
+        </>
+      ) : null}
+    </Drawer>
+  );
 }
 
 export default function FilesPage() {
-  const [searchParams, setSearchParams] = useSearchParams();
-  const [filters, setFilters] = useState<Filters>(() => readFilters(searchParams));
+  useDocumentTitle('文件');
+  const toast = useToast();
+  const [params, setParams] = useSearchParams();
+
+  const filters = useMemo(() => readFilters(params), [params]);
+  const selectedId = useMemo(() => {
+    const raw = params.get('file');
+    const value = Number(raw);
+    return raw && Number.isInteger(value) && value > 0 ? value : null;
+  }, [params]);
+
   const [searchInput, setSearchInput] = useState(filters.q);
-  const [machines, setMachines] = useState<Machine[] | null>(null);
-  const [data, setData] = useState<FileList | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [selectedId, setSelectedId] = useState<number | null>(null);
-  const [detail, setDetail] = useState<FileDetail | null>(null);
-  const [detailError, setDetailError] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
-  const [notice, setNotice] = useState<string | null>(null);
+  const debouncedSearch = useDebouncedValue(searchInput, 300);
+
+  const { data: machines } = usePolling(
+    async (signal) => api<Machine[]>('/api/v1/machines', { signal }),
+    { intervalMs: 0 },
+  );
+
+  const apiParams = toApiParams(filters).toString();
+  const sizeRangeInvalid =
+    filters.sizeMin !== '' &&
+    filters.sizeMax !== '' &&
+    Number(filters.sizeMin) > Number(filters.sizeMax);
+  const list = usePolling(
+    async (signal) => api<FileList>(`/api/v1/files?${apiParams}`, { signal }),
+    { intervalMs: 0, deps: [apiParams], enabled: !sizeRangeInvalid },
+  );
+
+  const detail = usePolling(
+    async (signal) => {
+      if (selectedId === null) throw new Error('没有选中的文件');
+      return api<FileDetail>(`/api/v1/files/${selectedId}`, { signal });
+    },
+    { enabled: selectedId !== null, intervalMs: 0, deps: [selectedId] },
+  );
+
+  // URL 是唯一数据源：输入框防抖后写回 URL。
+  useEffect(() => {
+    if (debouncedSearch === filters.q) return;
+    const next = { ...filters, q: debouncedSearch, page: 1 };
+    setParams(toParams(next), { replace: true });
+  }, [debouncedSearch, filters, setParams]);
+
+  // 外部链接修改筛选条件时，同步搜索框。
+  useEffect(() => {
+    setSearchInput(filters.q);
+  }, [filters.q]);
+
+  const applyFilters = (patch: Partial<Filters>) => {
+    const next: Filters = { ...filters, ...patch };
+    if (patch.page === undefined) next.page = 1;
+    setParams(toParams(next), { replace: true });
+  };
+
+  const openFile = (fileId: number) => {
+    const next = new URLSearchParams(params);
+    next.set('file', String(fileId));
+    setParams(next);
+  };
+
+  const closeFile = () => {
+    const next = new URLSearchParams(params);
+    next.delete('file');
+    setParams(next, { replace: true });
+  };
+
+  const resetFilters = () => {
+    setSearchInput('');
+    setParams(new URLSearchParams(), { replace: true });
+  };
+
+  const exportCsv = async () => {
+    setExporting(true);
+    try {
+      const { truncated } = await downloadFile(
+        `/api/v1/files/export?${toApiParams(filters, 5000).toString()}`,
+        'observer-files.csv',
+      );
+      toast.success('已导出 CSV', truncated ? '数据超过 5000 行，只导出了前 5000 行。' : undefined);
+    } catch (err) {
+      toast.error('导出失败', (err as Error).message);
+    } finally {
+      setExporting(false);
+    }
+  };
 
   const mountOptions = useMemo(() => {
     const machineList = machines ?? [];
@@ -122,141 +435,51 @@ export default function FilesPage() {
       const machine = machineList.find((item) => item.machine_id === filters.machineId);
       return (machine?.mounts ?? []).map((mount) => ({ machine, mount }));
     }
-    return machineList.flatMap((machine) =>
-      machine.mounts.map((mount) => ({ machine, mount })),
-    );
+    return machineList.flatMap((machine) => machine.mounts.map((mount) => ({ machine, mount })));
   }, [machines, filters.machineId]);
 
-  useEffect(() => {
-    api<Machine[]>('/api/v1/machines')
-      .then(setMachines)
-      .catch((err: Error) => setError(err.message));
-  }, []);
-
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      setFilters((prev) =>
-        prev.q === searchInput ? prev : { ...prev, q: searchInput, page: 1 },
-      );
-    }, 300);
-    return () => clearTimeout(timer);
-  }, [searchInput]);
-
-  useEffect(() => {
-    setSearchParams(toSearchParams(filters), { replace: true });
-  }, [filters, setSearchParams]);
-
-  useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
-    setError(null);
-    const params = toApiParams(filters);
-    api<FileList>(`/api/v1/files?${params.toString()}`)
-      .then((result) => {
-        if (!cancelled) setData(result);
-      })
-      .catch((err: Error) => {
-        if (!cancelled) {
-          setError(err.message);
-          setData(null);
-        }
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [filters]);
-
-  useEffect(() => {
-    if (selectedId === null) {
-      setDetail(null);
-      setDetailError(null);
-      return;
-    }
-    let cancelled = false;
-    setDetail(null);
-    setDetailError(null);
-    api<FileDetail>(`/api/v1/files/${selectedId}`)
-      .then((result) => {
-        if (!cancelled) setDetail(result);
-      })
-      .catch((err: Error) => {
-        if (!cancelled) setDetailError(err.message);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [selectedId]);
-
-  const update = (patch: Partial<Filters>) => {
-    setFilters((prev) => ({ ...prev, ...patch, page: patch.page ?? 1 }));
-    setSelectedId(null);
-  };
-
-  const selectMachine = (machineId: string) => {
-    update({ machineId, mountPk: '' });
-  };
-
-  const selectMount = (mountPk: string) => {
-    const entry = mountOptions.find((item) => String(item.mount.id) === mountPk);
-    update({
-      mountPk,
-      machineId: entry?.machine?.machine_id ?? filters.machineId,
-    });
-  };
-
-  const exportCsv = async () => {
-    setExporting(true);
-    setNotice(null);
-    try {
-      const params = toApiParams(filters, 5000);
-      const response = await fetch(`/api/v1/files/export?${params.toString()}`, {
-        credentials: 'include',
-      });
-      if (!response.ok) {
-        throw new Error(`导出失败: HTTP ${response.status}`);
-      }
-      const blob = await response.blob();
-      const url = URL.createObjectURL(blob);
-      const anchor = document.createElement('a');
-      anchor.href = url;
-      anchor.download = 'observer-files.csv';
-      anchor.click();
-      URL.revokeObjectURL(url);
-      setNotice(response.headers.get('x-observer-truncated') === 'true' ? '已导出前 5000 行' : '已导出 CSV');
-    } catch (err) {
-      setNotice((err as Error).message);
-    } finally {
-      setExporting(false);
-    }
-  };
-
-  const totalPages = Math.max(1, Math.ceil((data?.total ?? 0) / filters.pageSize));
-  const summary = data?.summary;
-  const issues = detail?.issues ?? [];
-  const observations = detail?.observations ?? [];
+  const summary = list.data?.summary;
+  const total = list.data?.total ?? 0;
+  const totalPages = Math.max(1, Math.ceil(total / filters.pageSize));
+  const items: FileItem[] = list.data?.items ?? [];
+  const activeFilters = hasActiveFilters(filters);
+  const selectedDetail = detail.data && detail.data.file.id === selectedId ? detail.data : null;
 
   return (
     <>
-      <div className="toolbar" style={{ justifyContent: 'space-between' }}>
-        <h1>文件</h1>
-        <div className="toolbar">
-          <button className="ghost" type="button" disabled={exporting} onClick={() => void exportCsv()}>
-            {exporting ? '导出中…' : '导出 CSV'}
-          </button>
-          <button className="ghost" type="button" onClick={() => setFilters((prev) => ({ ...prev }))}>
-            刷新
-          </button>
-        </div>
-      </div>
+      <PageHeader
+        title="文件"
+        subtitle={
+          list.lastUpdatedAt
+            ? `共 ${formatCount(total)} 条 · 更新于 ${formatTime(list.lastUpdatedAt)}`
+            : '按机器、挂载点、状态与哈希检索已入库文件'
+        }
+        actions={
+          <>
+            <button
+              className="btn"
+              type="button"
+              disabled={exporting}
+              onClick={() => void exportCsv()}
+            >
+              {exporting ? '导出中…' : '导出 CSV'}
+            </button>
+            <button className="btn" type="button" onClick={() => list.reload()}>
+              刷新
+            </button>
+          </>
+        }
+      />
 
       <div className="panel">
         <div className="filter-grid">
-          <label>
-            机器
-            <select value={filters.machineId} onChange={(event) => selectMachine(event.target.value)}>
+          <label className="field">
+            <span className="field-label">机器</span>
+            <select
+              className="select"
+              value={filters.machineId}
+              onChange={(event) => applyFilters({ machineId: event.target.value, mountPk: '' })}
+            >
               <option value="">全部机器</option>
               {(machines ?? []).map((machine) => (
                 <option key={machine.machine_id} value={machine.machine_id}>
@@ -265,324 +488,323 @@ export default function FilesPage() {
               ))}
             </select>
           </label>
-          <label>
-            挂载点
-            <select value={filters.mountPk} onChange={(event) => selectMount(event.target.value)}>
+          <label className="field">
+            <span className="field-label">挂载点</span>
+            <select
+              className="select"
+              value={filters.mountPk}
+              onChange={(event) => {
+                const entry = mountOptions.find((item) => String(item.mount.id) === event.target.value);
+                applyFilters({
+                  mountPk: event.target.value,
+                  machineId: entry?.machine?.machine_id ?? filters.machineId,
+                });
+              }}
+            >
               <option value="">全部挂载点</option>
               {mountOptions.map(({ machine, mount }) => (
                 <option key={mount.id} value={String(mount.id)}>
                   {filters.machineId
                     ? mount.label ?? mount.mount_id
-                    : `${machine?.label ?? machine?.machine_id ?? '-'} / ${mount.label ?? mount.mount_id}`}
+                    : `${machine?.label ?? machine?.machine_id ?? '—'} / ${mount.label ?? mount.mount_id}`}
                 </option>
               ))}
             </select>
           </label>
-          <label>
-            搜索路径 / SHA-256
+          <label className="field">
+            <span className="field-label">搜索路径 / SHA-256</span>
             <input
+              className="input"
               value={searchInput}
               onChange={(event) => setSearchInput(event.target.value)}
-              placeholder="路径关键字；恰好 64 位 hex 时按哈希精确搜索"
+              placeholder="路径关键字；64 位十六进制按哈希精确搜索"
             />
           </label>
-          <label>
-            状态
-            <select value={filters.state} onChange={(event) => update({ state: event.target.value })}>
+          <label className="field">
+            <span className="field-label">状态</span>
+            <select
+              className="select"
+              value={filters.state}
+              onChange={(event) => applyFilters({ state: event.target.value })}
+            >
               <option value="">全部</option>
               <option value="active">正常</option>
               <option value="missing">缺失</option>
               <option value="out_of_scope">已移出规则</option>
             </select>
           </label>
-          <label>
-            异常
-            <select value={filters.issue} onChange={(event) => update({ issue: event.target.value })}>
+          <label className="field">
+            <span className="field-label">异常</span>
+            <select
+              className="select"
+              value={filters.issue}
+              onChange={(event) => applyFilters({ issue: event.target.value })}
+            >
               <option value="">全部</option>
               <option value="open">有未处理异常</option>
               <option value="none">无未处理异常</option>
             </select>
           </label>
-          <label>
-            哈希
-            <select value={filters.hash} onChange={(event) => update({ hash: event.target.value })}>
-              <option value="">全部</option>
-              <option value="hashed">已哈希</option>
-              <option value="unhashed">未哈希</option>
-            </select>
-          </label>
-          <label>
-            最小字节
-            <input
-              type="number"
-              min={0}
-              value={filters.sizeMin}
-              onChange={(event) => update({ sizeMin: event.target.value })}
-            />
-          </label>
-          <label>
-            最大字节
-            <input
-              type="number"
-              min={0}
-              value={filters.sizeMax}
-              onChange={(event) => update({ sizeMax: event.target.value })}
-            />
-          </label>
-          <label>
-            排序
-            <select value={filters.sort} onChange={(event) => update({ sort: event.target.value })}>
-              <option value="path">路径</option>
-              <option value="size">大小</option>
-              <option value="last_seen">最后发现</option>
-              <option value="last_hashed">最后哈希</option>
-              <option value="state">状态</option>
-            </select>
-          </label>
-          <label>
-            顺序
-            <select value={filters.order} onChange={(event) => update({ order: event.target.value })}>
-              <option value="asc">升序</option>
-              <option value="desc">降序</option>
-            </select>
-          </label>
-          <label>
-            每页
-            <select
-              value={String(filters.pageSize)}
-              onChange={(event) => update({ pageSize: Number(event.target.value) })}
-            >
-              {PAGE_SIZES.map((size) => (
-                <option key={size} value={String(size)}>
-                  {size}
-                </option>
-              ))}
-            </select>
-          </label>
-          <button
-            className="ghost"
-            type="button"
-            onClick={() => {
-              setSearchInput('');
-              setFilters({
-                q: '',
-                machineId: '',
-                mountPk: '',
-                state: '',
-                issue: '',
-                hash: '',
-                sizeMin: '',
-                sizeMax: '',
-                sort: 'path',
-                order: 'asc',
-                page: 1,
-                pageSize: 50,
-              });
-              setSelectedId(null);
-            }}
-          >
-            重置
-          </button>
         </div>
+
+        <details className="filters-more">
+          <summary className="muted" style={{ fontSize: 'var(--text-xs)', cursor: 'pointer' }}>
+            更多筛选
+          </summary>
+          <div className="filter-grid" style={{ marginTop: 10 }}>
+            <label className="field">
+              <span className="field-label">哈希</span>
+              <select
+                className="select"
+                value={filters.hash}
+                onChange={(event) => applyFilters({ hash: event.target.value })}
+              >
+                <option value="">全部</option>
+                <option value="hashed">已哈希</option>
+                <option value="unhashed">未哈希</option>
+              </select>
+            </label>
+            <label className="field">
+              <span className="field-label">最小字节</span>
+              <input
+                className="input"
+                type="number"
+                min={0}
+                value={filters.sizeMin}
+                onChange={(event) => applyFilters({ sizeMin: event.target.value })}
+              />
+            </label>
+            <label className="field">
+              <span className="field-label">最大字节（最小字节需 ≤ 最大字节）</span>
+              <input
+                className="input"
+                type="number"
+                min={0}
+                value={filters.sizeMax}
+                onChange={(event) => applyFilters({ sizeMax: event.target.value })}
+              />
+            </label>
+            <label className="field">
+              <span className="field-label">排序</span>
+              <select
+                className="select"
+                value={filters.sort}
+                onChange={(event) => applyFilters({ sort: event.target.value })}
+              >
+                {SORT_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="field">
+              <span className="field-label">顺序</span>
+              <select
+                className="select"
+                value={filters.order}
+                onChange={(event) => applyFilters({ order: event.target.value })}
+              >
+                <option value="asc">升序</option>
+                <option value="desc">降序</option>
+              </select>
+            </label>
+            <button className="btn" type="button" onClick={resetFilters}>
+              重置全部
+            </button>
+          </div>
+        </details>
 
         {summary ? (
-          <div className="toolbar chips">
-            <span className="chip">共 {summary.total}</span>
-            <button className="chip" type="button" onClick={() => update({ state: 'active' })}>
-              正常 {summary.active}
+          <div className="chips" style={{ marginTop: 12 }}>
+            <span className="chip chip-static">共 {formatCount(summary.total)}</span>
+            <button
+              className={`chip${filters.state === 'active' ? ' active' : ''}`}
+              type="button"
+              onClick={() => applyFilters({ state: filters.state === 'active' ? '' : 'active' })}
+            >
+              正常 {formatCount(summary.active)}
             </button>
-            <button className="chip" type="button" onClick={() => update({ state: 'missing' })}>
-              缺失 {summary.missing}
+            <button
+              className={`chip${filters.state === 'missing' ? ' active' : ''}`}
+              type="button"
+              onClick={() => applyFilters({ state: filters.state === 'missing' ? '' : 'missing' })}
+            >
+              缺失 {formatCount(summary.missing)}
             </button>
-            <button className="chip" type="button" onClick={() => update({ state: 'out_of_scope' })}>
-              移出规则 {summary.out_of_scope}
+            <button
+              className={`chip${filters.state === 'out_of_scope' ? ' active' : ''}`}
+              type="button"
+              onClick={() =>
+                applyFilters({ state: filters.state === 'out_of_scope' ? '' : 'out_of_scope' })
+              }
+            >
+              移出规则 {formatCount(summary.out_of_scope)}
             </button>
-            <button className="chip" type="button" onClick={() => update({ issue: 'open' })}>
-              有异常 {summary.open_issue_paths}
+            <button
+              className={`chip${filters.issue === 'open' ? ' active' : ''}`}
+              type="button"
+              onClick={() => applyFilters({ issue: filters.issue === 'open' ? '' : 'open' })}
+            >
+              有异常 {formatCount(summary.open_issue_paths)}
             </button>
-            <button className="chip" type="button" onClick={() => update({ hash: 'hashed' })}>
-              已哈希 {summary.hashed}
+            <button
+              className={`chip${filters.hash === 'hashed' ? ' active' : ''}`}
+              type="button"
+              onClick={() => applyFilters({ hash: filters.hash === 'hashed' ? '' : 'hashed' })}
+            >
+              已哈希 {formatCount(summary.hashed)}
             </button>
-            <button className="chip" type="button" onClick={() => update({ hash: 'unhashed' })}>
-              未哈希 {summary.unhashed}
+            <button
+              className={`chip${filters.hash === 'unhashed' ? ' active' : ''}`}
+              type="button"
+              onClick={() => applyFilters({ hash: filters.hash === 'unhashed' ? '' : 'unhashed' })}
+            >
+              未哈希 {formatCount(summary.unhashed)}
             </button>
+            {activeFilters ? (
+              <button className="chip" type="button" onClick={resetFilters}>
+                清除筛选
+              </button>
+            ) : null}
           </div>
         ) : null}
 
-        {notice ? <div className="muted">{notice}</div> : null}
-        {error ? <div className="error">{error}</div> : null}
-        {loading ? <div className="muted">加载中…</div> : null}
-
-        {!loading && data && data.items.length === 0 ? (
-          <div className="muted">当前筛选没有文件；如果还没巡检过，请先对挂载点触发一次 baseline 或 full 巡检。</div>
+        {sizeRangeInvalid ? (
+          <div className="alert alert-warn" role="alert" style={{ marginTop: 12 }}>
+            最小字节大于最大字节，已暂停查询。请调整大小范围。
+          </div>
         ) : null}
 
-        {data && data.items.length > 0 ? (
-          <div className="table-wrap">
-            <table className="files-table">
-              <thead>
-                <tr>
-                  <th>路径</th>
-                  <th>机器</th>
-                  <th>挂载点</th>
-                  <th>状态</th>
-                  <th>大小</th>
-                  <th>最后发现</th>
-                  <th>最后哈希</th>
-                  <th>哈希</th>
-                  <th>异常</th>
-                </tr>
-              </thead>
-              <tbody>
-                {data.items.map((item: FileItem) => (
-                  <tr
-                    key={item.id}
-                    className={selectedId === item.id ? 'selected' : undefined}
-                    onClick={() => setSelectedId(selectedId === item.id ? null : item.id)}
-                  >
-                    <td className="file-path">{decodePath(item.path_display_b64)}</td>
-                    <td>{item.machine_label ?? item.machine_id}</td>
-                    <td>{item.mount_label ?? item.mount_id}</td>
-                    <td>
-                      <span className={stateClass(item.state)}>{fileStateLabel(item.state)}</span>
-                    </td>
-                    <td>{formatBytes(item.size)}</td>
-                    <td>{formatTime(item.last_seen_at)}</td>
-                    <td>{formatTime(item.last_hashed_at)}</td>
-                    <td
-                      className="file-path"
-                      title={item.content_hash ?? undefined}
-                    >
-                      {item.content_hash ? `${item.content_hash.slice(0, 12)}…` : '-'}
-                    </td>
-                    <td>{item.open_issue_count > 0 ? item.open_issue_count : '-'}</td>
+        {list.error ? (
+          <div className="alert alert-danger" role="alert" style={{ marginTop: 12 }}>
+            加载文件列表失败：{list.error.message}
+          </div>
+        ) : null}
+
+        {!list.data && !list.error ? <PageLoading /> : null}
+
+        {list.data && items.length === 0 ? (
+          <EmptyState
+            title={activeFilters ? '当前筛选没有文件' : '还没有入库文件'}
+            description={
+              activeFilters
+                ? '换一组筛选条件，或清除筛选后重试。'
+                : '先对挂载点执行一次全量巡检，文件元数据入库后会出现在这里。'
+            }
+            action={
+              activeFilters ? (
+                <button className="btn" type="button" onClick={resetFilters}>
+                  清除筛选
+                </button>
+              ) : (
+                <Link className="btn btn-primary" to="/machines">
+                  去机器页发起巡检
+                </Link>
+              )
+            }
+          />
+        ) : null}
+
+        {items.length > 0 ? (
+          <>
+            <div className="table-wrap" style={{ marginTop: 12 }}>
+              <table className="table table-wide">
+                <thead>
+                  <tr>
+                    <th scope="col">路径</th>
+                    <th scope="col">位置</th>
+                    <th scope="col">状态</th>
+                    <th scope="col" className="num">
+                      大小
+                    </th>
+                    <th scope="col">最近活动</th>
+                    <th scope="col" className="num">
+                      异常
+                    </th>
+                    <th scope="col">操作</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        ) : null}
+                </thead>
+                <tbody>
+                  {items.map((item) => (
+                    <tr
+                      key={item.id}
+                      className={selectedId === item.id ? 'is-selected' : undefined}
+                      style={{ cursor: 'pointer' }}
+                      onClick={(event) => {
+                        if ((event.target as HTMLElement).closest('a,button')) return;
+                        openFile(item.id);
+                      }}
+                    >
+                      <td>
+                        <div className="mono">{decodePath(item.path_display_b64)}</div>
+                        <div className="cell-sub" title={item.content_hash ?? undefined}>
+                          SHA-256 {shortHash(item.content_hash, 12)}
+                        </div>
+                      </td>
+                      <td>
+                        {item.machine_label ?? item.machine_id}
+                        <div className="cell-sub">{item.mount_label ?? item.mount_id}</div>
+                      </td>
+                      <td>
+                        <StatusBadge value={item.state} map={fileState} />
+                      </td>
+                      <td className="num">{formatBytes(item.size)}</td>
+                      <td title={formatTime(item.last_seen_at)}>
+                        {formatRelative(item.last_seen_at)}
+                        <div className="cell-sub">
+                          {item.last_hashed_at
+                            ? `校验于 ${formatRelative(item.last_hashed_at)}`
+                            : '尚未校验'}
+                        </div>
+                      </td>
+                      <td className="num">
+                        {item.open_issue_count > 0 ? (
+                          <Link
+                            to={`/issues?machine_id=${encodeURIComponent(item.machine_id)}&q=${encodeURIComponent(item.path_key)}`}
+                          >
+                            {item.open_issue_count}
+                          </Link>
+                        ) : (
+                          <span className="muted">—</span>
+                        )}
+                      </td>
+                      <td>
+                        <button
+                          className="btn btn-sm"
+                          type="button"
+                          onClick={() => openFile(item.id)}
+                          aria-label={`查看 ${item.path_key} 的详情`}
+                        >
+                          详情
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
 
-        <div className="toolbar" style={{ justifyContent: 'space-between', marginTop: 10 }}>
-          <span className="muted">
-            共 {data?.total ?? 0} 条 · 第 {filters.page}/{totalPages} 页
-          </span>
-          <div className="toolbar">
-            <button
-              className="ghost"
-              type="button"
-              disabled={filters.page <= 1}
-              onClick={() => update({ page: filters.page - 1 })}
-            >
-              上一页
-            </button>
-            <button
-              className="ghost"
-              type="button"
-              disabled={filters.page >= totalPages}
-              onClick={() => update({ page: filters.page + 1 })}
-            >
-              下一页
-            </button>
-          </div>
-        </div>
+            <Pagination
+              page={filters.page}
+              totalPages={totalPages}
+              total={total}
+              pageSize={filters.pageSize}
+              pageSizes={PAGE_SIZES}
+              itemLabel="个文件"
+              onPage={(page) => applyFilters({ page })}
+              onPageSize={(pageSize) => applyFilters({ pageSize })}
+            />
+          </>
+        ) : null}
       </div>
 
       {selectedId !== null ? (
-        <div className="panel file-detail">
-          <div className="toolbar" style={{ justifyContent: 'space-between' }}>
-            <h2>文件详情</h2>
-            <button className="ghost" type="button" onClick={() => setSelectedId(null)}>
-              关闭
-            </button>
-          </div>
-          {detailError ? <div className="error">{detailError}</div> : null}
-          {detail === null && detailError === null ? <div className="muted">加载中…</div> : null}
-          {detail ? (
-            <>
-              <p className="file-path">{fullPath(detail)}</p>
-              <p className="muted">
-                {detail.machine.machine_id} / {detail.mount.mount_id} ·{' '}
-                <span className={stateClass(detail.file.state)}>{fileStateLabel(detail.file.state)}</span> ·{' '}
-                {formatBytes(detail.file.size)} · mtime {formatNs(detail.file.mtime_ns)} · 最后发现{' '}
-                {formatTime(detail.file.last_seen_at)} · 最后哈希 {formatTime(detail.file.last_hashed_at)}
-              </p>
-              <p className="muted file-path">
-                SHA-256: {detail.file.content_hash ?? '-'} · last_hash_kind:{' '}
-                {detail.file.last_hash_kind ?? '-'}
-              </p>
-              <div className="toolbar">
-                <button className="ghost" type="button" onClick={() => void copyText(fullPath(detail))}>
-                  复制完整路径
-                </button>
-                {detail.file.content_hash ? (
-                  <button
-                    className="ghost"
-                    type="button"
-                    onClick={() => void copyText(detail.file.content_hash ?? '')}
-                  >
-                    复制哈希
-                  </button>
-                ) : null}
-                <Link className="ghost" to={`/mounts/${detail.mount.id}`}>
-                  挂载点详情
-                </Link>
-              </div>
-
-              <h2>异常（{issues.length}）</h2>
-              {issues.length === 0 ? (
-                <div className="muted">无异常记录</div>
-              ) : (
-                <table>
-                  <thead>
-                    <tr>
-                      <th>类型</th>
-                      <th>状态</th>
-                      <th>置信度</th>
-                      <th>次数</th>
-                      <th>最近</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {issues.map((issue) => (
-                      <tr key={issue.id}>
-                        <td>{issue.type}</td>
-                        <td>{issue.status}</td>
-                        <td>{issue.confidence}</td>
-                        <td>{issue.occurrences}</td>
-                        <td>{formatTime(issue.last_seen_at)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )}
-
-              <h2>最近观测（{observations.length}）</h2>
-              {observations.length === 0 ? (
-                <div className="muted">暂无观测记录</div>
-              ) : (
-                <table>
-                  <thead>
-                    <tr>
-                      <th>哈希</th>
-                      <th>类型</th>
-                      <th>时间</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {observations.map((observation, index) => (
-                      <tr key={`${observation.hash}-${index}`}>
-                        <td className="file-path">{observation.hash}</td>
-                        <td>{observation.kind}</td>
-                        <td>{formatTime(observation.observed_at)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )}
-            </>
-          ) : null}
-        </div>
+        <FileDetailDrawer
+          detail={selectedDetail}
+          error={selectedDetail ? null : detail.error}
+          onClose={closeFile}
+        />
       ) : null}
     </>
   );

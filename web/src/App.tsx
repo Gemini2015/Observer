@@ -1,64 +1,16 @@
 import { useEffect, useState } from 'react';
-import { BrowserRouter, Link, Navigate, Route, Routes, useLocation } from 'react-router-dom';
+import { BrowserRouter } from 'react-router-dom';
 import { api } from './api';
-import Files from './pages/Files';
-import Issues from './pages/Issues';
-import Jobs from './pages/Jobs';
+import { AppShell } from './app/AppShell';
+import { ConfirmProvider } from './components/ConfirmDialog';
+import { ErrorBoundary } from './components/ErrorBoundary';
+import { ToastProvider } from './components/Toast';
 import Login from './pages/Login';
-import Machines from './pages/Machines';
-import MountDetail from './pages/MountDetail';
-import Overview from './pages/Overview';
 
-const links = [
-  { to: '/', label: '总览' },
-  { to: '/machines', label: '机器与挂载点' },
-  { to: '/files', label: '文件' },
-  { to: '/jobs', label: '任务' },
-  { to: '/issues', label: '异常' },
-];
-
-function Shell({ onLogout }: { onLogout: () => void }) {
-  const location = useLocation();
-  return (
-    <div className="app">
-      <aside className="nav">
-        <div className="brand">
-          <img className="brand-icon" src="/logo.svg" alt="" />
-          <span>Observer</span>
-        </div>
-        <nav>
-          {links.map((link) => {
-            const active =
-              link.to === '/' ? location.pathname === '/' : location.pathname.startsWith(link.to);
-            return (
-              <Link key={link.to} to={link.to} className={active ? 'active' : undefined}>
-                {link.label}
-              </Link>
-            );
-          })}
-        </nav>
-        <div className="spacer" />
-        <button type="button" onClick={onLogout}>
-          退出登录
-        </button>
-      </aside>
-      <main className="main">
-        <Routes>
-          <Route path="/" element={<Overview />} />
-          <Route path="/machines" element={<Machines />} />
-          <Route path="/files" element={<Files />} />
-          <Route path="/mounts/:id" element={<MountDetail />} />
-          <Route path="/jobs" element={<Jobs />} />
-          <Route path="/issues" element={<Issues />} />
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
-      </main>
-    </div>
-  );
-}
+type Status = 'checking' | 'in' | 'out';
 
 export default function App() {
-  const [status, setStatus] = useState<'checking' | 'in' | 'out'>('checking');
+  const [status, setStatus] = useState<Status>('checking');
 
   useEffect(() => {
     let cancelled = false;
@@ -81,20 +33,35 @@ export default function App() {
   const logout = async () => {
     try {
       await api('/api/v1/auth/logout', { method: 'POST' });
+    } catch {
+      // 会话可能已经失效；无论结果如何都回到登录页
     } finally {
       setStatus('out');
     }
   };
 
   if (status === 'checking') {
-    return <div className="boot">加载中…</div>;
+    return (
+      <div className="boot">
+        <img src="/logo.svg" alt="" />
+        <span>正在连接中心服…</span>
+      </div>
+    );
   }
-  if (status === 'out') {
-    return <Login onSuccess={() => setStatus('in')} />;
-  }
+
   return (
-    <BrowserRouter>
-      <Shell onLogout={logout} />
-    </BrowserRouter>
+    <ErrorBoundary>
+      <ToastProvider>
+        <ConfirmProvider>
+          {status === 'out' ? (
+            <Login onSuccess={() => setStatus('in')} />
+          ) : (
+            <BrowserRouter>
+              <AppShell onLogout={() => void logout()} />
+            </BrowserRouter>
+          )}
+        </ConfirmProvider>
+      </ToastProvider>
+    </ErrorBoundary>
   );
 }
