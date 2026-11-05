@@ -6,9 +6,9 @@
 
 | 命令 | 范围 |
 | --- | --- |
-| `pnpm --filter hub test` | hub：认证、注册/心跳、任务、入库、调度、多机、修复、聚合（12 个文件/50 项） |
+| `pnpm --filter hub test` | hub：认证、注册/心跳、任务、入库、调度、多机、修复、聚合（21 个文件/73 项） |
 | `pnpm --filter hub typecheck` | hub 源码 + 测试类型检查 |
-| `pnpm --filter web typecheck` / `build` | Web 控制台 |
+| `pnpm --filter web typecheck` / `test` / `build` | Web 控制台（含格式化/标签函数单测） |
 | `cd agent; go test ./...` | agent 各包（配置、规则、哈希、限速、缓存、扫描、修复、client 等） |
 | `cd agent; go vet ./...` | agent 静态检查 |
 | `cd agent/desktop; go vet ./...` | 桌面模块静态检查 |
@@ -68,8 +68,43 @@ pwsh ./scripts/bench.ps1 -Files 200 -SizeBytes 1048576   # 1MB × 200
 
 未在本机验证：Docker 镜像构建、systemd 实际运行、NSIS 安装包、macOS 构建/签名/公证（见 [DEPLOY §7](DEPLOY.md#7-本机验证状态)）。
 
+> 2026-11-05 Web 控制台改造：`pnpm --filter web typecheck` / `test`（23 项）/ `build` 与 `pnpm --filter hub test`（21 文件/73 项）通过；UI 手动验收见 §7。本次未重跑 drill（未改 agent 与协议）。
+
 ## 6. 本地提示
 
 - 验收脚本会产生 `data/` 下的临时目录（已 gitignore）；可用 `scripts` 的 `-KeepData` 保留日志排查。
 - Windows 下 Go 不在 PATH 时：`$env:PATH = "C:\Program Files\Go\bin;$env:PATH"`；Wails CLI 在 `%USERPROFILE%\go\bin`。
 - 同机跑多个 agent（drill 场景）时，`token_file` 必须分别放在不同目录（缓存/spool 派生自该目录）。
+
+## 7. UI 手动验收清单
+
+改造 Web 控制台后，用「复制一份 `hub/data` + 本地 hub」的方式做手动验收（不要直接改原始数据）：
+
+```powershell
+Copy-Item -Recurse hub\data data\ui-check
+$env:OBSERVER_DATA_DIR=(Resolve-Path data\ui-check).Path
+$env:OBSERVER_ADMIN_PASSWORD='observer'
+$env:OBSERVER_PORT='8787'
+$env:OBSERVER_SCHEDULER_ENABLED='false'
+pnpm --filter hub dev        # 终端 A：hub 8787
+
+pnpm --filter web dev        # 终端 B：打开 http://127.0.0.1:5173（/api 代理到 8787）
+```
+
+| # | 检查项 | 期望 |
+| --- | --- | --- |
+| 1 | 空库启动 | 总览覆盖率为「—/无文件」，不是 100% |
+| 2 | 停 hub 10 秒再恢复 | 页面保留旧数据并提示刷新失败；恢复后自动刷新，无需 F5 |
+| 3 | 390px / 768px / 1024px / 1440px | 页面本身不横向滚动；宽表格在容器内横向滚动 |
+| 4 | 键盘 Tab | 可达侧栏、筛选、表格行内「详情」；抽屉 Esc 关闭后焦点回到触发按钮 |
+| 5 | 文件页打开详情 | URL 带 `?file=`，刷新仍打开，浏览器 Back 关闭 |
+| 6 | 异常页 | tab 计数与列表一致；勾选 2 条批量确认后有 Toast、列表刷新 |
+| 7 | 修复流程 | 选副本 → 开始 → 进度条与状态推进 → 终态提示；失败原因可读 |
+| 8 | 删除机器 | 需输入机器 ID 才能确认；取消无副作用 |
+| 9 | 术语 | 页面不出现 open/acked/mismatch/seen/hashed 等裸枚举（技术信息折叠区除外） |
+| 10 | 对比度 | 危险按钮与 muted 文本 ≥ 4.5:1 |
+| 11 | 任务页 | 状态/机器/挂载点筛选生效；自动刷新可关；点行进 `/jobs/:id` |
+| 12 | `/audit` | 有记录、可按动作前缀筛选、详情可展开 |
+| 13 | `/repairs` | 有记录时展示源→目标与进度，进行中可取消 |
+| 14 | `/system` | 版本/运行时长/调度参数/数据库规模正确，注册 token 可生成 |
+| 15 | 会话过期 | 任一请求 401 后回到登录页；重新登录回到原路由 |

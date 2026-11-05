@@ -18,7 +18,7 @@ Observer 由**中心服（hub）**和部署在各台机器上的 **agent** 组�
 - **可靠**：本地缓存 + hub 清单增量同步、离线 spool 补发、租约过期重派、批次幂等。
 - **调度**：按窗口 + 每日预算 + 间隔自动派发，跨午夜窗口，心跳超时机器标记离线。
 - **修复**：内容哈希全等的副本关联；hub 中转分块传输；目标端 quarantine + 原子替换 + 复核；全程审计。
-- **界面**：React Web 控制台（总览/机器/任务/异常/修复）；Wails 桌面客户端（托盘/单实例/自启）。
+- **界面**：React Web 控制台（总览/机器与挂载点/文件/任务/异常/修复/审计/系统）；Wails 桌面客户端（托盘/单实例/自启）。
 - **部署**：systemd、Docker Compose、Linux amd64/arm64 交叉编译。
 
 ## 架构
@@ -59,6 +59,7 @@ docs/        需求、设计、计划、部署与测试文档
 | 设计 | [路径与身份模型](docs/DESIGN-PATH-MODEL.md) | 三元组身份、mount 映射、引用串、失败模式 |
 | 设计 | [技术方案](docs/DESIGN-TECH.md) | 架构、技术选型（T1–T20）、协议、数据模型、Agent 专题 |
 | 计划 | [里程碑与后续](docs/ROADMAP.md) | M1–M4 完成情况、tag、后续方向 |
+| 设计 | [UI 评审与改造](docs/UI-REVIEW.md) | Web 控制台的评审结论、设计决策与落地对照 |
 | 计划 | [M1](docs/PLAN-M1.md) / [M2](docs/PLAN-M2.md) / [M3](docs/PLAN-M3.md) / [M4](docs/PLAN-M4.md) | 各里程碑范围、设计与验收记录 |
 | 测试 | [测试与验收](docs/TESTING.md) | 单测、drill M1–M4、性能基准、回归矩阵 |
 | 部署 | [部署与打包](docs/DEPLOY.md) | NAS systemd/Docker、Windows、macOS 签名公证 |
