@@ -11,6 +11,7 @@ import { registerTokenRoutes } from './tokens.js';
 import { registerHealthRoutes } from './health.js';
 import { registerIssueRoutes } from './issues.js';
 import { registerMountRoutes } from './mounts.js';
+import { registerSystemRoutes } from './system.js';
 
 export interface RouteContext {
   env: Env;
@@ -28,4 +29,5 @@ export function registerRoutes(app: FastifyInstance, ctx: RouteContext): void {
   registerScanRoutes(app, ctx);
   registerTokenRoutes(app, ctx);
   registerDashboardRoutes(app, ctx);
+  registerSystemRoutes(app, ctx);
 }

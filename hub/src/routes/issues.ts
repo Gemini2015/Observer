@@ -22,27 +22,120 @@ interface IssueListRow {
   machine_id: string;
 }
 
-const ALLOWED_STATUS = new Set(['open', 'acked', 'ignored', 'resolved']);
+type IssueStatusKey = 'open' | 'acked' | 'ignored' | 'resolved';
+type IssueTypeKey = 'mismatch' | 'missing' | 'unreadable';
+
+const ALLOWED_STATUS: ReadonlySet<string> = new Set<IssueStatusKey>([
+  'open',
+  'acked',
+  'ignored',
+  'resolved',
+]);
+const ALLOWED_TYPES: ReadonlySet<string> = new Set<IssueTypeKey>([
+  'mismatch',
+  'missing',
+  'unreadable',
+]);
+
+/** LIKE 模式转义：`\` `%` `_` 均按字面量匹配（配合 ESCAPE '\'）。 */
+function escapeLike(value: string): string {
+  return value.replace(/[\\%_]/g, (match) => `\\${match}`);
+}
 
 export function registerIssueRoutes(app: FastifyInstance, ctx: RouteContext): void {
+  app.get('/api/v1/issues/summary', async (request) => {
+    requireSession(ctx.db, request);
+    const db = ctx.db;
+
+    const status: Record<IssueStatusKey, number> = {
+      open: 0,
+      acked: 0,
+      ignored: 0,
+      resolved: 0,
+    };
+    const statusRows = db
+      .prepare('SELECT status, COUNT(*) AS count FROM issues GROUP BY status')
+      .all() as Array<{ status: string; count: number }>;
+    for (const row of statusRows) {
+      if (
+        row.status === 'open' ||
+        row.status === 'acked' ||
+        row.status === 'ignored' ||
+        row.status === 'resolved'
+      ) {
+        status[row.status] = row.count;
+      }
+    }
+
+    // 类型分布口径与总览一致：只看仍需处理的 open 异常。
+    const type: Record<IssueTypeKey, number> = { mismatch: 0, missing: 0, unreadable: 0 };
+    const typeRows = db
+      .prepare("SELECT type, COUNT(*) AS count FROM issues WHERE status = 'open' GROUP BY type")
+      .all() as Array<{ type: string; count: number }>;
+    for (const row of typeRows) {
+      if (row.type === 'mismatch' || row.type === 'missing' || row.type === 'unreadable') {
+        type[row.type] = row.count;
+      }
+    }
+
+    const machines = db
+      .prepare(
+        `SELECT mc.machine_id AS machine_id, COUNT(*) AS open
+         FROM issues i
+         JOIN mounts m ON m.id = i.mount_pk
+         JOIN machines mc ON mc.id = m.machine_pk
+         WHERE i.status = 'open'
+         GROUP BY mc.machine_id
+         ORDER BY open DESC, mc.machine_id`,
+      )
+      .all() as Array<{ machine_id: string; open: number }>;
+
+    return { status, type, machines };
+  });
+
   app.get('/api/v1/issues', async (request) => {
     requireSession(ctx.db, request);
-    const query = request.query as { status?: string };
-    const status = query.status && ALLOWED_STATUS.has(query.status) ? query.status : undefined;
+    const query = request.query as {
+      status?: string;
+      machine_id?: string;
+      type?: string;
+      q?: string;
+    };
 
-    const statement = ctx.db.prepare(`
-      SELECT i.id, i.type, i.status, i.confidence, i.occurrences,
-             i.first_seen_at, i.last_seen_at, i.resolved_at, i.evidence_json,
-             p.path_key, p.path_display, m.mount_id, mc.machine_id
-      FROM issues i
-      JOIN paths p ON p.id = i.path_pk
-      JOIN mounts m ON m.id = i.mount_pk
-      JOIN machines mc ON mc.id = m.machine_pk
-      ${status ? 'WHERE i.status = ?' : ''}
-      ORDER BY i.last_seen_at DESC
-      LIMIT 500
-    `);
-    const rows = (status ? statement.all(status) : statement.all()) as IssueListRow[];
+    const conditions: string[] = [];
+    const params: string[] = [];
+    if (query.status && ALLOWED_STATUS.has(query.status)) {
+      conditions.push('i.status = ?');
+      params.push(query.status);
+    }
+    if (query.machine_id) {
+      conditions.push('mc.machine_id = ?');
+      params.push(query.machine_id);
+    }
+    if (query.type && ALLOWED_TYPES.has(query.type)) {
+      conditions.push('i.type = ?');
+      params.push(query.type);
+    }
+    if (query.q) {
+      conditions.push("p.path_key LIKE ? ESCAPE '\\'");
+      params.push(`%${escapeLike(query.q)}%`);
+    }
+    const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+
+    const rows = ctx.db
+      .prepare(
+        `SELECT i.id, i.type, i.status, i.confidence, i.occurrences,
+                i.first_seen_at, i.last_seen_at, i.resolved_at, i.evidence_json,
+                p.path_key, p.path_display, m.mount_id, mc.machine_id
+         FROM issues i
+         JOIN paths p ON p.id = i.path_pk
+         JOIN mounts m ON m.id = i.mount_pk
+         JOIN machines mc ON mc.id = m.machine_pk
+         ${where}
+         ORDER BY i.last_seen_at DESC
+         LIMIT 500`,
+      )
+      .all(...params) as IssueListRow[];
 
     return rows.map((row) => ({
       id: row.id,

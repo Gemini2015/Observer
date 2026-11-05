@@ -119,6 +119,47 @@ export async function loginCookie(ctx: TestContext): Promise<string> {
   return `${cookie.name}=${cookie.value}`;
 }
 
+/** 注册额外机器（多机聚合/筛选场景复用）；机器 id 与挂载点 id 由调用方指定。 */
+export async function enrollAgentFor(
+  ctx: TestContext,
+  machineId: string,
+  mountId: string,
+): Promise<AgentSession> {
+  const token = makeEnrollToken(ctx.db, machineId);
+  const response = await ctx.app.inject({
+    method: 'POST',
+    url: '/api/v1/enroll',
+    headers: { 'x-observer-enroll-token': token },
+    payload: validEnrollPayload(machineId, mountId),
+  });
+  if (response.statusCode !== 201) {
+    throw new Error(`enroll failed: ${response.statusCode} ${response.body}`);
+  }
+  const body = response.json() as {
+    agent_id: number;
+    token: string;
+    machine_id: string;
+    mounts: Array<{ id: number; mount_id: string }>;
+  };
+  const mount = body.mounts[0];
+  if (!mount) throw new Error('enroll response missing mount');
+  return {
+    agentId: body.agent_id,
+    agentToken: body.token,
+    mountId: mount.id,
+    machineId: body.machine_id,
+  };
+}
+
+/** 机器主键（/api/v1/machines 列表元素里的 id）。 */
+export function machinePkOf(ctx: TestContext, machineId: string): number {
+  const row = ctx.db.prepare('SELECT id FROM machines WHERE machine_id = ?').get(machineId) as
+    | { id: number }
+    | undefined;
+  if (!row) throw new Error(`machine not found: ${machineId}`);
+  return row.id;
+}
+
 export function sha256Of(content: string): string {
   return createHash('sha256').update(content, 'utf8').digest('hex');
 }
