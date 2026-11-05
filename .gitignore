@@ -24,6 +24,7 @@ token
 # ---- 本地 agent 配置 / compose 媒体目录（可能含 token 或用户数据） ----
 agent.yaml
 deploy/mounts/
+deploy/docker-compose.local.yml
 
 # ---- 前端构建产物 ----
 web/dist/

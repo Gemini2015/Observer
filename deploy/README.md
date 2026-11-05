@@ -42,5 +42,6 @@ docker compose up -d --build
 
 ## 说明
 
-- `Dockerfile.*` 与 `docker-compose.yml` 已做静态检查并修复已知问题，但当前开发机没有 Docker，未实际 build/run；请在部署机执行一次 `docker compose up -d --build` 验证。
+- `Dockerfile.hub` 与 compose（hub）已在 WSL2 Ubuntu + Docker 29 实测 build/run；`Dockerfile.agent` 本次未实际 build（未指定巡检目录）。
+- 本机/单机可用 `deploy/docker-compose.local.yml` 覆盖端口、镜像名与外部数据卷，主 compose 保持 NAS 默认；示例见 [docs/DEPLOY.md §3](../docs/DEPLOY.md#3-nas--服务器docker-compose)。
 - macOS 打包/签名/公证见 [docs/DEPLOY.md](../docs/DEPLOY.md)。

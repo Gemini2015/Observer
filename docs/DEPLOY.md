@@ -55,6 +55,37 @@ observer.example.com {
 }
 ```
 
+### WSL2 本机部署（已验证）
+
+Windows + WSL2 Ubuntu 中跑 Docker 时，建议用本地 override 文件保留自己的端口与数据卷，不改主 compose：
+
+```yaml
+# deploy/docker-compose.local.yml（本地文件，已 gitignore）
+services:
+  hub:
+    image: observer-hub:local
+    ports: !override
+      - "127.0.0.1:13000:8787"
+    volumes: !override
+      - "observer-hub-data:/data"
+volumes:
+  observer-hub-data:
+    external: true
+```
+
+```bash
+cd /mnt/e/workspace/node/Observer
+docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.local.yml \
+  --env-file deploy/.env up -d --build hub
+docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.local.yml \
+  --env-file deploy/.env ps
+```
+
+- 仅启动 hub 时，已有原生/桌面 agent 可继续连同一地址；要启用 compose 里的 Docker agent，需先把 `agent.yaml` 的 `hub` 改为 `http://hub:8787`、指定只读媒体目录并生成注册 token。
+- 升级保留数据：沿用同一个 external volume 与 `OBSERVER_ADMIN_PASSWORD`；先 `docker stop` 旧容器再 `up`，**不要同时运行两个 hub 实例**（同一 SQLite 卷会被两个进程写入）。
+- 回滚：升级前 `docker tag observer-hub:local observer-hub:local-backup-<日期>`；需要时停新容器，用备份镜像按原参数 `docker run`。
+- WSL 关机后重新 `wsl -d Ubuntu` 即可恢复（Docker 服务已 enable，容器 `restart: unless-stopped`）；hub 仅绑定 `127.0.0.1`，不会暴露到局域网。
+
 ## 4. Windows
 
 - agent：`go build -o bin/observer-agent.exe ./cmd/observer-agent`（已验证）。
@@ -103,7 +134,8 @@ spctl -a -vv "bin/Observer Agent.app"
 | 项 | 状态 |
 | --- | --- |
 | Linux amd64 / arm64 交叉编译、ELF、大小 | ✅ 已验证（7.3 / 6.8 MiB） |
-| Dockerfile / compose 静态检查 | ⚠️ 已修复构建/监听/卷权限问题；本机无 Docker，未实际 build/run |
+| Dockerfile.hub / compose（hub） | ✅ 2026-11-05 在 WSL2 Ubuntu + Docker 29 实测：镜像 build、healthcheck、卷保留升级、数据与在线 agent 均正常 |
+| Dockerfile.agent / compose（agent） | ⚠️ 本次未实际 build/run（未指定巡检目录）；已知配置见 `deploy/agent.example.yaml` |
 | systemd unit | ✅ 静态检查（本机无 systemd 环境，未实际启动） |
 | Windows agent / 桌面 exe | ✅ 构建、启动、单实例 |
 | Wails NSIS 打包 | ❌ 未验证（未安装 NSIS） |
