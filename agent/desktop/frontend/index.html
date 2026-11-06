@@ -5,285 +5,102 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Observer Agent</title>
     <link rel="icon" type="image/svg+xml" href="/icon.svg" />
-    <link rel="stylesheet" href="/src/style.css" />
+    <link rel="stylesheet" href="/src/styles/index.css" />
   </head>
   <body>
     <div class="app">
-      <div id="setup-view" class="hidden">
-        <header>
+      <section id="setup-root" class="setup-view hidden" aria-label="首次配置"></section>
+
+      <div id="main-view" class="main-view hidden">
+        <header class="topbar">
           <div class="brand">
             <img class="brand-icon" src="/logo.svg" alt="" />
-            <h1>Observer Agent</h1>
+            <div>
+              <div class="brand-title">Observer Agent</div>
+              <div id="brand-sub" class="brand-sub">本机文件完整性巡检</div>
+            </div>
           </div>
-          <span class="badge warn">首次配置</span>
-        </header>
-        <p class="muted">
-          配置文件：<span id="setup-path">-</span>
-        </p>
-        <div id="setup-error" class="error hidden"></div>
-
-        <section class="card">
-          <h2>连接</h2>
-          <div class="form-grid">
-            <label class="field">
-              <span>机器 ID</span>
-              <input id="setup-machine-id" placeholder="例如 win-01" autocomplete="off" />
-            </label>
-            <label class="field">
-              <span>显示名称</span>
-              <input id="setup-label" placeholder="可选" autocomplete="off" />
-            </label>
-            <label class="field">
-              <span>hub 地址</span>
-              <input id="setup-hub" placeholder="http://127.0.0.1:8787" autocomplete="off" />
-            </label>
-            <label class="field">
-              <span>注册 token / 接入 token</span>
-              <input id="setup-token" placeholder="新节点：注册 token；已有节点：机器页获取接入 token" autocomplete="off" />
-            </label>
-          </div>
-          <div class="toolbar">
-            <button id="setup-open-hub" class="ghost" type="button">打开 hub Web 获取 token</button>
-            <button id="setup-probe" class="ghost" type="button">识别已有节点</button>
-            <span id="setup-probe-status" class="muted">已有节点：粘贴接入 token 后点识别，自动填充机器与挂载点。</span>
-          </div>
-        </section>
-
-        <section class="card">
-          <div class="toolbar" style="justify-content: space-between">
-            <h2>挂载点</h2>
-            <button id="setup-add-mount" class="ghost" type="button">新增挂载点</button>
-          </div>
-          <div id="setup-mounts" class="mount-list"></div>
-          <p class="muted">
-            sentinel 是可选守卫文件：留空表示直接扫描整个目录；填写后必须确保目录里存在该文件且内容包含 mount id，
-            否则该挂载点会被判定为不可用并跳过巡检。
-          </p>
-        </section>
-
-        <div class="toolbar">
-          <button id="setup-save" class="primary" type="button">保存并启动</button>
-          <span id="setup-status" class="muted"></span>
-        </div>
-      </div>
-
-      <div id="main-view" class="hidden">
-        <header>
-          <div class="brand">
-            <img class="brand-icon" src="/logo.svg" alt="" />
-            <h1>Observer Agent</h1>
-          </div>
-          <nav class="nav">
-            <button id="nav-status" class="nav-btn active" type="button">状态</button>
-            <button id="nav-files" class="nav-btn" type="button">文件</button>
-            <button id="nav-settings" class="nav-btn" type="button">设置</button>
+          <nav id="tabs" class="tabs topbar-tabs" role="tablist" aria-label="主导航">
+            <button
+              id="nav-status"
+              class="tab"
+              type="button"
+              role="tab"
+              aria-selected="true"
+              aria-controls="status-view"
+              tabindex="0"
+            >
+              状态
+            </button>
+            <button
+              id="nav-files"
+              class="tab"
+              type="button"
+              role="tab"
+              aria-selected="false"
+              aria-controls="files-view"
+              tabindex="-1"
+            >
+              文件
+            </button>
+            <button
+              id="nav-settings"
+              class="tab"
+              type="button"
+              role="tab"
+              aria-selected="false"
+              aria-controls="settings-view"
+              tabindex="-1"
+            >
+              设置
+            </button>
           </nav>
-          <span id="conn" class="badge">连接中</span>
+          <div class="topbar-status">
+            <span id="conn" class="badge badge--warn" title="">
+              <span class="dot" aria-hidden="true"></span>
+              <span id="conn-text">连接中…</span>
+            </span>
+          </div>
         </header>
 
-        <div id="status-view">
-          <section class="cards">
-            <div class="card">
-              <div class="label">机器</div>
-              <div id="machine" class="value">-</div>
-            </div>
-            <div class="card">
-              <div class="label">巡检状态</div>
-              <div id="state" class="value">-</div>
-            </div>
-            <div class="card">
-              <div class="label">hub</div>
-              <div id="hub" class="value small">-</div>
-            </div>
-            <div class="card">
-              <div class="label">最近同步</div>
-              <div id="last-run" class="value small">尚未同步</div>
-            </div>
-          </section>
+        <main class="view-scroll">
+          <section
+            id="status-view"
+            class="view"
+            role="tabpanel"
+            aria-labelledby="nav-status"
+            tabindex="0"
+          ></section>
+          <section
+            id="files-view"
+            class="view hidden"
+            role="tabpanel"
+            aria-labelledby="nav-files"
+            tabindex="0"
+          ></section>
+          <section
+            id="settings-view"
+            class="view hidden"
+            role="tabpanel"
+            aria-labelledby="nav-settings"
+            tabindex="0"
+          ></section>
+        </main>
 
-          <section class="card hidden" id="current-card">
-            <h2>当前任务</h2>
-            <div id="current-title" class="current-title">-</div>
-            <div class="progress"><span></span></div>
-            <div id="current-detail" class="muted">-</div>
-          </section>
-
-          <section class="card">
-            <h2>最近一轮统计</h2>
-            <div id="stats" class="stats">暂无</div>
-          </section>
-
-          <section class="card">
-            <h2>最近任务</h2>
-            <table class="jobs">
-              <thead>
-                <tr>
-                  <th>#</th>
-                  <th>挂载点</th>
-                  <th>模式</th>
-                  <th>状态</th>
-                  <th>开始</th>
-                  <th>结果</th>
-                </tr>
-              </thead>
-              <tbody id="jobs">
-                <tr>
-                  <td colspan="6" class="muted">暂无任务</td>
-                </tr>
-              </tbody>
-            </table>
-          </section>
-
-          <section class="card">
-            <h2>最近错误</h2>
-            <div id="error" class="error">无</div>
-          </section>
-        </div>
-
-        <div id="files-view" class="hidden">
-          <div class="toolbar" style="justify-content: space-between">
-            <h2>本机文件</h2>
-            <div class="toolbar">
-              <button id="files-refresh" class="ghost" type="button">刷新</button>
-              <button id="files-open-hub" class="ghost" type="button">在 hub 中查看</button>
-            </div>
+        <footer class="footer">
+          <div class="footer-links">
+            <button id="footer-open-hub" class="btn btn-ghost btn-sm" type="button">
+              打开 hub Web
+            </button>
+            <span id="footer-version" class="hint">版本 —</span>
           </div>
-
-          <div class="panel">
-            <div class="toolbar file-filters">
-              <label class="field">
-                <span>挂载点</span>
-                <select id="files-mount">
-                  <option value="">全部</option>
-                </select>
-              </label>
-              <label class="field">
-                <span>搜索路径 / SHA-256</span>
-                <input id="files-q" placeholder="路径关键字或 64 位哈希" autocomplete="off" />
-              </label>
-              <label class="field">
-                <span>状态</span>
-                <select id="files-state">
-                  <option value="">全部</option>
-                  <option value="active">正常</option>
-                  <option value="missing">缺失</option>
-                  <option value="out_of_scope">已移出规则</option>
-                </select>
-              </label>
-              <label class="field">
-                <span>异常</span>
-                <select id="files-issue">
-                  <option value="">全部</option>
-                  <option value="open">有未处理异常</option>
-                  <option value="none">无未处理异常</option>
-                </select>
-              </label>
-              <label class="field">
-                <span>哈希</span>
-                <select id="files-hash">
-                  <option value="">全部</option>
-                  <option value="hashed">已哈希</option>
-                  <option value="unhashed">未哈希</option>
-                </select>
-              </label>
-              <label class="field">
-                <span>排序</span>
-                <select id="files-sort">
-                  <option value="path">路径</option>
-                  <option value="size">大小</option>
-                  <option value="last_seen">最后发现</option>
-                  <option value="last_hashed">最后哈希</option>
-                  <option value="state">状态</option>
-                </select>
-              </label>
-              <label class="field">
-                <span>顺序</span>
-                <select id="files-order">
-                  <option value="asc">升序</option>
-                  <option value="desc">降序</option>
-                </select>
-              </label>
-              <button id="files-reset" class="ghost" type="button">重置</button>
-            </div>
-
-            <div id="files-summary" class="stats muted">-</div>
-            <div id="files-error" class="error hidden"></div>
-            <div id="files-empty" class="muted hidden">暂无文件，请先完成一次 baseline/full 巡检。</div>
-            <div class="files-wrap">
-              <table class="jobs files-table hidden" id="files-table">
-                <thead>
-                  <tr>
-                    <th>路径</th>
-                    <th>挂载点</th>
-                    <th>状态</th>
-                    <th>大小</th>
-                    <th>最后发现</th>
-                    <th>哈希</th>
-                    <th>异常</th>
-                  </tr>
-                </thead>
-                <tbody id="files-rows"></tbody>
-              </table>
-            </div>
-
-            <div class="toolbar" style="justify-content: space-between; margin-top: 10px">
-              <span id="files-total" class="muted"></span>
-              <div class="toolbar">
-                <button id="files-prev" class="ghost" type="button">上一页</button>
-                <button id="files-next" class="ghost" type="button">下一页</button>
-              </div>
-            </div>
-          </div>
-
-          <div id="file-detail" class="panel hidden"></div>
-        </div>
-
-        <div id="settings-view" class="hidden">
-          <h2>设置</h2>
-          <p class="muted">
-            配置路径：<span id="settings-path">-</span>
-          </p>
-          <div class="form-grid">
-            <label class="field">
-              <span>机器 ID（只读）</span>
-              <input id="settings-machine-id" disabled />
-            </label>
-            <label class="field">
-              <span>hub 地址（只读）</span>
-              <input id="settings-hub" disabled />
-            </label>
-            <label class="field">
-              <span>状态目录（只读）</span>
-              <input id="settings-state-dir" disabled />
-            </label>
-            <label class="field">
-              <span>显示名称</span>
-              <input id="settings-label" placeholder="可选" autocomplete="off" />
-            </label>
-          </div>
-
-          <div class="toolbar" style="justify-content: space-between">
-            <h2>挂载点</h2>
-            <button id="settings-add-mount" class="ghost" type="button">新增挂载点</button>
-          </div>
-          <div id="settings-mounts" class="mount-list"></div>
-          <p class="muted">
-            修改 path 只影响本机扫描，hub Web 显示的路径为注册快照；新增挂载点后请在 hub Web 触发一次基线巡检。
-            sentinel 留空表示不启用挂载守卫；填写后需确保目录中存在该文件。
-            调度/限速/只读等高级配置请编辑 YAML；更换 hub/token/机器 ID 需要重新注册（删除配置文件后重启可重新进入首次配置向导）。
-          </p>
-
-          <div class="toolbar">
-            <button id="settings-save" class="primary" type="button">保存设置</button>
-            <span id="settings-status" class="muted"></span>
-          </div>
-        </div>
-
-        <footer>
-          <button id="open-hub" class="ghost" type="button">打开 hub Web</button>
-          <span class="muted">关闭窗口会隐藏到托盘，巡检继续</span>
+          <span class="hint">关闭窗口会隐藏到托盘，巡检继续</span>
         </footer>
       </div>
+
+      <div id="toast-root" class="toast-stack" role="status" aria-live="polite"></div>
+      <div id="modal-root"></div>
+      <div id="drawer-root"></div>
     </div>
     <script type="module" src="/src/main.js"></script>
   </body>
