@@ -49,7 +49,7 @@
 
 - 设计令牌与 hub 同名（dark 值）：颜色、间距、字号、圆角、阴影、焦点环。
 - 基础组件类：按钮/徽章/面板/KPI/指标/表格/表单/chips/空态/Toast/对话框/抽屉/进度条/挂载点卡片。
-- 深色标题栏（Wails `WindowsWindow.Theme=Dark`）；主区域 flex + 页面单层滚动，footer 固定；880×640 最小窗口可用。
+- 深色标题栏（Wails `WindowsWindow.Theme=Dark`）；主区域 flex + 页面单层滚动，footer 单行贴底；880×640 最小窗口可用。
 - 键盘：tabs 使用 `role=tablist/tab` + 方向键（UIA 已识别为 TabItem）、详情用按钮、Esc 关闭抽屉/对话框并还原焦点、`:focus-visible` 焦点环、`prefers-reduced-motion`。
 - 反馈：Toast（`aria-live`）、按钮 busy、复制/保存/暂停/同步结果均有提示；错误全局兜底（`error`/`unhandledrejection` → Toast）。
 - 真实状态：不确定进度条 + 真实计数，而不是固定 35% 的假进度。
@@ -70,7 +70,8 @@
 - **正常宽度保留表头吸附**：`.table-wrap` 默认 `overflow:visible`，`table th` 相对页面滚动容器 sticky；窄窗口（≤980px）隐藏文件表的「最后发现」次要列、表格按可用宽度收缩，并关闭 sticky，只保留横向滚动兜底。
 - **抽屉单层滚动**：`.drawer-body` 是抽屉唯一滚动体；抽屉内表格只横向滚动，code block 删除 `max-height` 并改为 `pre-wrap`，不再内滚。
 - **滚动链收口**：页面/抽屉/对话框加 `overscroll-behavior: contain`；在 CSS 表格段写明「页面内表格禁止再设 max-height 纵向滚动」的契约。
-- **验证**：状态页/文件页在 1100×800 与 880×640 下均只有一条纵向 scrollbar；窄窗口文件表隐藏「最后发现」列后完整显示其余列，不再出现内层滚动条；抽屉只滚动抽屉体。截图保存在 `data/desktop-shots/`。
+- **底部收口**：Toast/Modal/Drawer 三个 portal 根节点移出 `.app`，避免空 flex item 产生两个额外 gap；`.app` 底部 padding 归零，footer 改为单行 `nowrap` + 4px 呼吸位并贴齐 client 底边；首次向导单独补底部 padding。
+- **验证**：状态页/文件页在 1100×800 与 880×640 下均只有一条纵向 scrollbar；窄窗口文件表隐藏「最后发现」列后完整显示其余列，不再出现内层滚动条；抽屉只滚动抽屉体；footer 在两种尺寸下均为单行且距 client 底边约 4px。截图保存在 `data/desktop-shots/`。
 
 ## 4. 设计决策
 
