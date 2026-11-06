@@ -6,6 +6,7 @@ import {
   fileEntry,
   loginCookie,
   scanOnce,
+  sha256Of,
   type TestContext,
 } from './helpers.js';
 
@@ -45,7 +46,7 @@ describe('overview aggregation', () => {
     });
     expect(overview.statusCode).toBe(200);
     const data = overview.json() as {
-      issues: { open: number; acked: number };
+      issues: { open: number; ignored: number };
       issues_by_type: { mismatch: number; missing: number; unreadable: number };
       issues_by_machine: Array<{ machine_id: string; open: number }>;
     };
@@ -70,28 +71,31 @@ describe('overview aggregation', () => {
     const issue = context.db.prepare('SELECT id FROM issues LIMIT 1').get() as { id: number };
     await context.app.inject({
       method: 'POST',
-      url: `/api/v1/issues/${issue.id}/ack`,
+      url: `/api/v1/issues/${issue.id}/ignore`,
       headers: { cookie },
+      payload: { observed_hash: sha256Of('corrupted') },
     });
 
-    const afterAck = await context.app.inject({
+    const afterIgnore = await context.app.inject({
       method: 'GET',
       url: '/api/v1/overview',
       headers: { cookie },
     });
-    const acked = afterAck.json() as {
+    const ignored = afterIgnore.json() as {
+      issues: { open: number; ignored: number };
       issues_by_type: { mismatch: number };
       issues_by_machine: Array<{ machine_id: string; open: number }>;
     };
-    expect(acked.issues_by_type.mismatch).toBe(0);
-    expect(acked.issues_by_machine).toEqual([]);
+    expect(ignored.issues).toEqual({ open: 0, ignored: 1 });
+    expect(ignored.issues_by_type.mismatch).toBe(0);
+    expect(ignored.issues_by_machine).toEqual([]);
 
-    const ackedMachines = await context.app.inject({
+    const ignoredMachines = await context.app.inject({
       method: 'GET',
       url: '/api/v1/machines',
       headers: { cookie },
     });
-    expect(ackedMachines.json()).toMatchObject([{ open_issues: 0 }]);
+    expect(ignoredMachines.json()).toMatchObject([{ open_issues: 0 }]);
   });
 
   it('reports scan freshness and attention mounts', async () => {

@@ -50,7 +50,7 @@ describe('dashboard', () => {
         last_job_status: string | null;
       }>;
       coverage: { total: number; hashed: number; ratio: number };
-      issues: { open: number; acked: number };
+      issues: { open: number; ignored: number };
       jobs: { pending: number; running: number };
       recent_jobs: Array<Record<string, unknown>>;
     };

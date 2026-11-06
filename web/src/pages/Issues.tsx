@@ -2,6 +2,9 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import {
   api,
+  ignoreIssue,
+  rebaselineIssue,
+  unignoreIssue,
   type Issue,
   type IssueDetail,
   type IssueSummary,
@@ -33,6 +36,7 @@ import {
   confidence,
   fileState,
   isRepairTerminal,
+  issueResolution,
   issueStatus,
   issueType,
   labelOf,
@@ -42,7 +46,6 @@ import {
 
 const STATUS_TABS = [
   { key: 'open', label: '待确认' },
-  { key: 'acked', label: '已确认' },
   { key: 'ignored', label: '已忽略' },
   { key: 'resolved', label: '已解决' },
 ] as const;
@@ -66,6 +69,7 @@ function IssueDrawer({ issueId, onClose, onChanged }: IssueDrawerProps) {
   const [repairId, setRepairId] = useState<number | null>(null);
   const [repair, setRepair] = useState<RepairView | null>(null);
   const [busy, setBusy] = useState(false);
+  const [actionBusy, setActionBusy] = useState(false);
   const terminalRef = useRef(false);
 
   const detailState = usePolling(
@@ -184,6 +188,89 @@ function IssueDrawer({ issueId, onClose, onChanged }: IssueDrawerProps) {
   const replicas = detailState.data?.replicas;
   const transferProgress =
     repair && repair.transfer.size > 0 ? repair.transfer.bytes_received / repair.transfer.size : null;
+  const isBusy = busy || actionBusy;
+
+  const performRebaseline = async () => {
+    if (!detail || !detail.observed_hash) return;
+    const ok = await confirm({
+      title: '确认以当前观测哈希为新基线？',
+      description: (
+        <>
+          <div>
+            旧基线：<span className="mono">{detail.expected_hash ?? '—'}</span>
+          </div>
+          <div>
+            新基线：<span className="mono">{detail.observed_hash}</span>
+          </div>
+          <div className="muted" style={{ marginTop: 8 }}>
+            确认后只更新当前文件，后续巡检以新哈希为准；其他机器上的副本不会自动改变。
+          </div>
+        </>
+      ),
+      confirmText: '确认更新',
+    });
+    if (!ok) return;
+    setActionBusy(true);
+    try {
+      await rebaselineIssue(detail.id, detail.observed_hash);
+      toast.success('已更新基线', '后续巡检将以本次观测的哈希为准');
+      detailState.reload();
+      onChanged();
+    } catch (err) {
+      toast.error('确认更新失败', (err as Error).message);
+    } finally {
+      setActionBusy(false);
+    }
+  };
+
+  const performIgnore = async () => {
+    if (!detail) return;
+    if (detail.type === 'mismatch' && !detail.observed_hash) {
+      toast.error('忽略失败', '本次异常没有可记录的观测哈希，请刷新后重试。');
+      return;
+    }
+    const ok = await confirm({
+      title: '忽略当前异常？',
+      description:
+        detail.type === 'mismatch'
+          ? '只会忽略本次观测到的哈希；同一哈希不再提示，文件恢复基线哈希或变为其他哈希时会重新判断。'
+          : '该异常会进入「已忽略」；同类状态恢复后会自动解决。',
+      confirmText: '忽略',
+    });
+    if (!ok) return;
+    setActionBusy(true);
+    try {
+      await ignoreIssue(detail.id, detail.type === 'mismatch' ? detail.observed_hash : null);
+      toast.success('已忽略异常');
+      detailState.reload();
+      onChanged();
+    } catch (err) {
+      toast.error('忽略失败', (err as Error).message);
+    } finally {
+      setActionBusy(false);
+    }
+  };
+
+  const performUnignore = async () => {
+    if (!detail) return;
+    const ok = await confirm({
+      title: '取消忽略这条异常？',
+      description: '异常会回到「待确认」，下一次巡检仍会按当前哈希重新判断。',
+      confirmText: '取消忽略',
+    });
+    if (!ok) return;
+    setActionBusy(true);
+    try {
+      await unignoreIssue(detail.id);
+      toast.success('已取消忽略');
+      detailState.reload();
+      onChanged();
+    } catch (err) {
+      toast.error('取消忽略失败', (err as Error).message);
+    } finally {
+      setActionBusy(false);
+    }
+  };
 
   return (
     <Drawer
@@ -232,9 +319,77 @@ function IssueDrawer({ issueId, onClose, onChanged }: IssueDrawerProps) {
                     ? '目标挂载点允许修复'
                     : '目标挂载点未开启跨机修复（repair_allowed）',
                 },
+                ...(detail.status === 'ignored' && detail.ignored_hash
+                  ? [
+                      {
+                        label: '忽略哈希',
+                        value: <span className="mono">{detail.ignored_hash}</span>,
+                      },
+                    ]
+                  : []),
+                ...(detail.status === 'ignored' && detail.ignored_at
+                  ? [{ label: '忽略时间', value: formatTime(detail.ignored_at) }]
+                  : []),
+                ...(detail.status === 'resolved' && detail.resolution
+                  ? [
+                      {
+                        label: '解决方式',
+                        value: (
+                          <StatusBadge
+                            value={detail.resolution}
+                            map={issueResolution}
+                            dot={false}
+                          />
+                        ),
+                      },
+                    ]
+                  : []),
+                ...(detail.status === 'resolved' && detail.resolved_at
+                  ? [{ label: '解决时间', value: formatTime(detail.resolved_at) }]
+                  : []),
               ]}
             />
           </section>
+
+          {detail.can_rebaseline || detail.can_ignore || detail.can_unignore || detail.repair_active ? (
+            <section>
+              <div className="toolbar">
+                {detail.can_rebaseline ? (
+                  <button
+                    className="btn btn-primary"
+                    type="button"
+                    disabled={isBusy}
+                    onClick={() => void performRebaseline()}
+                  >
+                    确认更新
+                  </button>
+                ) : null}
+                {detail.can_ignore ? (
+                  <button
+                    className="btn"
+                    type="button"
+                    disabled={isBusy}
+                    onClick={() => void performIgnore()}
+                  >
+                    忽略
+                  </button>
+                ) : null}
+                {detail.can_unignore ? (
+                  <button
+                    className="btn"
+                    type="button"
+                    disabled={isBusy}
+                    onClick={() => void performUnignore()}
+                  >
+                    取消忽略
+                  </button>
+                ) : null}
+                {detail.repair_active ? (
+                  <span className="muted">修复进行中，暂不能确认更新；可先取消修复。</span>
+                ) : null}
+              </div>
+            </section>
+          ) : null}
 
           <section>
             <div className="panel-title" style={{ marginBottom: 8 }}>
@@ -276,7 +431,7 @@ function IssueDrawer({ issueId, onClose, onChanged }: IssueDrawerProps) {
               <div className="muted">加载副本…</div>
             ) : replicas.replicas.length === 0 ? (
               <div className="alert alert-warn">
-                没有找到同内容的健康副本，暂时无法修复。可以先确认或忽略这条异常。
+                没有找到同内容的健康副本，暂时无法修复。可以先确认更新或忽略这条异常。
               </div>
             ) : (
               <>
@@ -325,21 +480,24 @@ function IssueDrawer({ issueId, onClose, onChanged }: IssueDrawerProps) {
                     className="btn btn-primary"
                     type="button"
                     disabled={
-                      busy ||
+                      isBusy ||
                       sourcePathId === null ||
                       !detail.repair_allowed ||
-                      !replicas.source_repairable
+                      !replicas.source_repairable ||
+                      !detail.can_repair
                     }
                     onClick={() => void startRepair()}
                   >
-                    {busy ? '提交中…' : '从副本修复'}
+                    {isBusy ? '提交中…' : '从副本修复'}
                   </button>
                   <span className="muted" style={{ fontSize: 'var(--text-xs)' }}>
                     {!detail.repair_allowed
                       ? '目标挂载点未开启跨机修复（repair_allowed）'
                       : !replicas.source_repairable
                         ? '该异常类型不支持跨机修复'
-                        : '修复过程需要源机器在线'}
+                        : !detail.can_repair
+                          ? '当前状态不可修复'
+                          : '修复过程需要源机器在线'}
                   </span>
                 </div>
               </>
@@ -403,7 +561,12 @@ export default function IssuesPage() {
   const [params, setParams] = useSearchParams();
 
   const statusParam = params.get('status');
-  const status: IssueStatusKey = isIssueStatus(statusParam) ? statusParam : 'open';
+  const status: IssueStatusKey =
+    statusParam === 'acked'
+      ? 'ignored'
+      : isIssueStatus(statusParam)
+        ? statusParam
+        : 'open';
   const type = params.get('type') ?? '';
   const machineId = params.get('machine_id') ?? '';
   const q = params.get('q') ?? '';
@@ -486,7 +649,10 @@ export default function IssuesPage() {
   };
 
   const issues = useMemo(() => listState.data ?? [], [listState.data]);
-  const selectable = issues.filter((issue) => issue.status === 'open' || issue.status === 'acked');
+  const selectable = issues.filter(
+    (issue) =>
+      issue.status === 'open' && (issue.type !== 'mismatch' || issue.observed_hash !== null),
+  );
   const allSelected = selectable.length > 0 && selectable.every((issue) => selected.has(issue.id));
 
   const toggleOne = (issueId: number) => {
@@ -502,40 +668,117 @@ export default function IssuesPage() {
     setSelected(allSelected ? new Set() : new Set(selectable.map((issue) => issue.id)));
   };
 
-  const applyAction = async (id: number, action: 'ack' | 'ignore') => {
-    setPendingId(id);
+  const finishAction = (issueId: number) => {
+    setSelected((current) => {
+      const next = new Set(current);
+      next.delete(issueId);
+      return next;
+    });
+    listState.reload();
+    summaryState.reload();
+  };
+
+  const applyRebaseline = async (issue: Issue) => {
+    if (!issue.observed_hash) {
+      toast.error('确认更新失败', '这条异常没有可用的观测哈希，请刷新后重试。');
+      return;
+    }
+    const ok = await confirm({
+      title: '确认以当前观测哈希为新基线？',
+      description: (
+        <>
+          <div>
+            旧基线：<span className="mono">{issue.expected_hash ?? '—'}</span>
+          </div>
+          <div>
+            新基线：<span className="mono">{issue.observed_hash}</span>
+          </div>
+          <div className="muted" style={{ marginTop: 8 }}>
+            确认后只更新当前文件，后续巡检以新哈希为准；其他机器上的副本不会自动改变。
+          </div>
+        </>
+      ),
+      confirmText: '确认更新',
+    });
+    if (!ok) return;
+    setPendingId(issue.id);
     try {
-      await api(`/api/v1/issues/${id}/${action}`, { method: 'POST' });
-      toast.success(action === 'ack' ? '已确认异常' : '已忽略异常');
-      listState.reload();
-      summaryState.reload();
+      await rebaselineIssue(issue.id, issue.observed_hash);
+      toast.success('已更新基线', '后续巡检将以本次观测的哈希为准');
+      finishAction(issue.id);
     } catch (err) {
-      toast.error(action === 'ack' ? '确认失败' : '忽略失败', (err as Error).message);
+      toast.error('确认更新失败', (err as Error).message);
     } finally {
       setPendingId(null);
     }
   };
 
-  const applyBulk = async (action: 'ack' | 'ignore') => {
-    const ids = Array.from(selected);
-    if (ids.length === 0) return;
-    if (action === 'ignore') {
-      const ok = await confirm({
-        title: `忽略选中的 ${ids.length} 条异常？`,
-        description: '忽略后这些异常不再出现在待确认列表；后续巡检复核一致时会自动解决。',
-        confirmText: '批量忽略',
-        tone: 'danger',
-      });
-      if (!ok) return;
+  const applyIgnore = async (issue: Issue) => {
+    if (issue.type === 'mismatch' && !issue.observed_hash) {
+      toast.error('忽略失败', '这条异常没有可记录的观测哈希，请刷新后重试。');
+      return;
     }
+    const ok = await confirm({
+      title: '忽略当前异常？',
+      description:
+        issue.type === 'mismatch'
+          ? '只会忽略本次观测到的哈希；同一哈希不再提示，文件恢复基线哈希或变为其他哈希时会重新判断。'
+          : '该异常会进入「已忽略」；同类状态恢复后会自动解决。',
+      confirmText: '忽略',
+    });
+    if (!ok) return;
+    setPendingId(issue.id);
+    try {
+      await ignoreIssue(issue.id, issue.type === 'mismatch' ? issue.observed_hash : null);
+      toast.success('已忽略异常');
+      finishAction(issue.id);
+    } catch (err) {
+      toast.error('忽略失败', (err as Error).message);
+    } finally {
+      setPendingId(null);
+    }
+  };
+
+  const applyUnignore = async (issue: Issue) => {
+    const ok = await confirm({
+      title: '取消忽略这条异常？',
+      description: '异常会回到「待确认」，下一次巡检仍会按当前哈希重新判断。',
+      confirmText: '取消忽略',
+    });
+    if (!ok) return;
+    setPendingId(issue.id);
+    try {
+      await unignoreIssue(issue.id);
+      toast.success('已取消忽略');
+      finishAction(issue.id);
+    } catch (err) {
+      toast.error('取消忽略失败', (err as Error).message);
+    } finally {
+      setPendingId(null);
+    }
+  };
+
+  const applyBulkIgnore = async () => {
+    const targets = issues.filter((issue) => selected.has(issue.id) && issue.status === 'open');
+    if (targets.length === 0) return;
+    const ok = await confirm({
+      title: `忽略选中的 ${targets.length} 条异常？`,
+      description:
+        'mismatch 只忽略本次观测到的哈希；同一哈希不再提示，文件恢复基线哈希或变为其他哈希时会重新判断。',
+      confirmText: '批量忽略',
+      tone: 'danger',
+    });
+    if (!ok) return;
     setBulkBusy(true);
     const results = await Promise.allSettled(
-      ids.map((id) => api(`/api/v1/issues/${id}/${action}`, { method: 'POST' })),
+      targets.map((issue) =>
+        ignoreIssue(issue.id, issue.type === 'mismatch' ? issue.observed_hash : null),
+      ),
     );
     const failed = results.filter((result) => result.status === 'rejected').length;
-    const succeeded = ids.length - failed;
+    const succeeded = targets.length - failed;
     if (failed === 0) {
-      toast.success(action === 'ack' ? `已确认 ${succeeded} 条异常` : `已忽略 ${succeeded} 条异常`);
+      toast.success(`已忽略 ${succeeded} 条异常`);
     } else {
       toast.warn('部分异常处理失败', `成功 ${succeeded} 条，失败 ${failed} 条，请刷新后重试。`);
     }
@@ -628,20 +871,12 @@ export default function IssuesPage() {
           <div className="toolbar" style={{ marginTop: 12 }}>
             <span className="muted">已选 {selected.size} 条</span>
             <button
-              className="btn btn-primary"
-              type="button"
-              disabled={bulkBusy}
-              onClick={() => void applyBulk('ack')}
-            >
-              {bulkBusy ? '处理中…' : '批量确认'}
-            </button>
-            <button
               className="btn btn-danger"
               type="button"
               disabled={bulkBusy}
-              onClick={() => void applyBulk('ignore')}
+              onClick={() => void applyBulkIgnore()}
             >
-              批量忽略
+              {bulkBusy ? '处理中…' : '批量忽略'}
             </button>
             <button
               className="btn btn-ghost"
@@ -704,7 +939,7 @@ export default function IssuesPage() {
               </thead>
               <tbody>
                 {issues.map((issue) => {
-                  const actionable = issue.status === 'open' || issue.status === 'acked';
+                  const rowBusy = pendingId === issue.id;
                   return (
                     <tr key={issue.id} className={selectedIssueId === issue.id ? 'is-selected' : undefined}>
                       <td>
@@ -712,7 +947,10 @@ export default function IssuesPage() {
                           type="checkbox"
                           checked={selected.has(issue.id)}
                           onChange={() => toggleOne(issue.id)}
-                          disabled={!actionable}
+                          disabled={
+                            issue.status !== 'open' ||
+                            (issue.type === 'mismatch' && !issue.observed_hash)
+                          }
                           aria-label={`选择异常 ${issue.id}`}
                         />
                       </td>
@@ -738,31 +976,49 @@ export default function IssuesPage() {
                       </td>
                       <td>
                         <StatusBadge value={issue.status} map={issueStatus} />
+                        {issue.status === 'resolved' && issue.resolution ? (
+                          <div className="cell-sub">
+                            {labelOf(issueResolution, issue.resolution).label}
+                          </div>
+                        ) : null}
                       </td>
                       <td>
                         <div className="row-actions">
-                          {issue.status === 'open' ? (
+                          {issue.type === 'mismatch' &&
+                          issue.observed_hash !== null &&
+                          (issue.status === 'open' || issue.status === 'ignored') ? (
                             <button
                               className="btn btn-sm"
                               type="button"
-                              disabled={pendingId === issue.id}
-                              onClick={() => void applyAction(issue.id, 'ack')}
+                              disabled={rowBusy}
+                              onClick={() => void applyRebaseline(issue)}
                             >
-                              确认
+                              确认更新
                             </button>
                           ) : null}
-                          {actionable ? (
+                          {issue.status === 'open' &&
+                          (issue.type !== 'mismatch' || issue.observed_hash !== null) ? (
                             <button
                               className="btn btn-sm"
                               type="button"
-                              disabled={pendingId === issue.id}
-                              onClick={() => void applyAction(issue.id, 'ignore')}
+                              disabled={rowBusy}
+                              onClick={() => void applyIgnore(issue)}
                             >
                               忽略
                             </button>
                           ) : null}
+                          {issue.status === 'ignored' ? (
+                            <button
+                              className="btn btn-sm"
+                              type="button"
+                              disabled={rowBusy}
+                              onClick={() => void applyUnignore(issue)}
+                            >
+                              取消忽略
+                            </button>
+                          ) : null}
                           <button className="btn btn-sm" type="button" onClick={() => openIssue(issue.id)}>
-                            详情 / 修复
+                            {issue.status === 'resolved' ? '详情' : '详情 / 修复'}
                           </button>
                         </div>
                       </td>

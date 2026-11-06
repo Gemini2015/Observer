@@ -73,7 +73,7 @@ export default function OverviewPage() {
         <KpiCard
           label="待确认异常"
           value={formatCount(data.issues.open)}
-          hint={`已确认 ${formatCount(data.issues.acked)} 条`}
+          hint={`已忽略 ${formatCount(data.issues.ignored)} 条`}
           to="/issues?status=open"
         />
         <KpiCard

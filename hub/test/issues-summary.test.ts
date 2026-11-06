@@ -6,6 +6,7 @@ import {
   fileEntry,
   loginCookie,
   scanOnce,
+  sha256Of,
   type TestContext,
 } from './helpers.js';
 
@@ -25,14 +26,14 @@ interface IssueRow {
 }
 
 interface SummaryBody {
-  status: { open: number; acked: number; ignored: number; resolved: number };
+  status: { open: number; ignored: number; resolved: number };
   type: { mismatch: number; missing: number; unreadable: number };
   machines: Array<{ machine_id: string; open: number }>;
 }
 
 /**
  * 造两类数据：
- * - test-machine：1 mismatch（acked）、1 unreadable（ignored）、2 missing（1 open + 1 resolved）
+ * - test-machine：1 mismatch（ignored）、1 unreadable（ignored）、2 missing（1 open + 1 resolved）
  * - beta-machine：3 mismatch（open，路径含字面量 % / _ / \，用于 LIKE 转义）
  */
 async function seedIssues(context: TestContext): Promise<string> {
@@ -93,13 +94,14 @@ async function seedIssues(context: TestContext): Promise<string> {
     return found;
   };
 
-  // mismatch -> acked（API）；unreadable -> ignored（API）；missing c.txt -> resolved（直接置状态）。
-  const ack = await context.app.inject({
+  // mismatch -> ignored（API）；unreadable -> ignored（API）；missing c.txt -> resolved（直接置状态）。
+  const ignoreMismatch = await context.app.inject({
     method: 'POST',
-    url: `/api/v1/issues/${issueFor('a.txt', 'mismatch').id}/ack`,
+    url: `/api/v1/issues/${issueFor('a.txt', 'mismatch').id}/ignore`,
     headers: { cookie },
+    payload: { observed_hash: sha256Of('corrupted') },
   });
-  expect(ack.statusCode).toBe(200);
+  expect(ignoreMismatch.statusCode).toBe(200);
   const ignore = await context.app.inject({
     method: 'POST',
     url: `/api/v1/issues/${issueFor('b.txt', 'unreadable').id}/ignore`,
@@ -146,7 +148,7 @@ describe('issues summary and filters', () => {
     });
     expect(response.statusCode).toBe(200);
     expect(response.json()).toEqual({
-      status: { open: 4, acked: 1, ignored: 1, resolved: 1 },
+      status: { open: 4, ignored: 2, resolved: 1 },
       type: { mismatch: 3, missing: 1, unreadable: 0 },
       machines: [
         { machine_id: 'beta-machine', open: 3 },

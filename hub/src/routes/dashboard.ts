@@ -144,9 +144,9 @@ export function registerDashboardRoutes(app: FastifyInstance, ctx: RouteContext)
       .get(threshold) as { total: number; hashed: number };
     const issues = db
       .prepare(
-        "SELECT COALESCE(SUM(CASE WHEN status = 'open' THEN 1 ELSE 0 END),0) AS open, COALESCE(SUM(CASE WHEN status = 'acked' THEN 1 ELSE 0 END),0) AS acked FROM issues",
+        "SELECT COALESCE(SUM(CASE WHEN status = 'open' THEN 1 ELSE 0 END),0) AS open, COALESCE(SUM(CASE WHEN status = 'ignored' THEN 1 ELSE 0 END),0) AS ignored FROM issues",
       )
-      .get() as { open: number; acked: number };
+      .get() as { open: number; ignored: number };
     const issuesByType = { mismatch: 0, missing: 0, unreadable: 0 };
     const issueTypeRows = db
       .prepare("SELECT type, COUNT(*) AS count FROM issues WHERE status = 'open' GROUP BY type")

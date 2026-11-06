@@ -7,6 +7,7 @@ import {
   heartbeat,
   loginCookie,
   scanOnce,
+  sha256Of,
   type AgentSession,
   type TestContext,
 } from './helpers.js';
@@ -321,7 +322,7 @@ describe('scan jobs', () => {
     expect(job.attempt).toBe(3);
   });
 
-  it('lists issues and supports acknowledge', async () => {
+  it('lists issues and supports ignore, unignore and rebaseline', async () => {
     const { ctx: context, agent, cookie } = await setup();
     ctx = context;
 
@@ -356,6 +357,7 @@ describe('scan jobs', () => {
       machine_id: string;
       path_key: string;
       path_display_b64: string;
+      observed_hash: string | null;
     }>;
     expect(issues).toHaveLength(1);
     const issue = issues[0]!;
@@ -366,22 +368,59 @@ describe('scan jobs', () => {
       mount_id: 'drill',
       machine_id: 'test-machine',
       path_key: 'a.txt',
+      observed_hash: sha256Of('HELLO'),
     });
     expect(Buffer.from(issue.path_display_b64, 'base64').toString('utf8')).toBe('a.txt');
 
-    const ack = await context.app.inject({
+    const ignore = await context.app.inject({
       method: 'POST',
-      url: `/api/v1/issues/${issue.id}/ack`,
+      url: `/api/v1/issues/${issue.id}/ignore`,
       headers: { cookie },
+      payload: { observed_hash: sha256Of('HELLO') },
     });
-    expect(ack.statusCode).toBe(200);
+    expect(ignore.statusCode).toBe(200);
 
-    const acked = await context.app.inject({
+    const ignored = await context.app.inject({
       method: 'GET',
-      url: '/api/v1/issues?status=acked',
+      url: '/api/v1/issues?status=ignored',
       headers: { cookie },
     });
-    expect((acked.json() as unknown[]).length).toBe(1);
+    expect((ignored.json() as unknown[]).length).toBe(1);
+
+    const unignore = await context.app.inject({
+      method: 'POST',
+      url: `/api/v1/issues/${issue.id}/unignore`,
+      headers: { cookie },
+    });
+    expect(unignore.statusCode).toBe(200);
+
+    const reopened = await context.app.inject({
+      method: 'GET',
+      url: '/api/v1/issues?status=open',
+      headers: { cookie },
+    });
+    expect((reopened.json() as unknown[]).length).toBe(1);
+
+    const rebaseline = await context.app.inject({
+      method: 'POST',
+      url: `/api/v1/issues/${issue.id}/rebaseline`,
+      headers: { cookie },
+      payload: { observed_hash: sha256Of('HELLO') },
+    });
+    expect(rebaseline.statusCode).toBe(200);
+    expect(rebaseline.json()).toMatchObject({ baseline_hash: sha256Of('HELLO') });
+
+    const resolved = await context.app.inject({
+      method: 'GET',
+      url: '/api/v1/issues?status=resolved',
+      headers: { cookie },
+    });
+    expect((resolved.json() as unknown[]).length).toBe(1);
+
+    const path = context.db
+      .prepare("SELECT content_hash FROM paths WHERE path_key = 'a.txt'")
+      .get() as { content_hash: string };
+    expect(path.content_hash).toBe(sha256Of('HELLO'));
   });
 
   it('streams the manifest as gzipped NDJSON', async () => {

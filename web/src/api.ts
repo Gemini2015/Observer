@@ -113,6 +113,35 @@ export async function downloadFile(path: string, filename: string): Promise<{ tr
 
 // ---------------------------------------------------------------- 类型定义
 
+export type IssueStatus = 'open' | 'ignored' | 'resolved';
+export type IssueResolution = 'recovered' | 'repaired' | 'rebaselined';
+
+export interface IssueActionResponse {
+  ok: true;
+  baseline_hash?: string;
+}
+
+/** 接受最近一次巡检观测到的 hash 为新基线。 */
+export function rebaselineIssue(id: number, observedHash: string): Promise<IssueActionResponse> {
+  return api<IssueActionResponse>(`/api/v1/issues/${id}/rebaseline`, {
+    method: 'POST',
+    body: JSON.stringify({ observed_hash: observedHash }),
+  });
+}
+
+/** 忽略当前异常；mismatch 需要传本次观测 hash。 */
+export function ignoreIssue(id: number, observedHash?: string | null): Promise<IssueActionResponse> {
+  return api<IssueActionResponse>(`/api/v1/issues/${id}/ignore`, {
+    method: 'POST',
+    body: JSON.stringify(observedHash ? { observed_hash: observedHash } : {}),
+  });
+}
+
+/** 取消忽略，把异常放回待确认。 */
+export function unignoreIssue(id: number): Promise<IssueActionResponse> {
+  return api<IssueActionResponse>(`/api/v1/issues/${id}/unignore`, { method: 'POST' });
+}
+
 export interface Coverage {
   total: number;
   hashed: number;
@@ -161,12 +190,17 @@ export interface Job {
 export interface Issue {
   id: number;
   type: string;
-  status: string;
+  status: IssueStatus;
   confidence: string;
   occurrences: number;
   first_seen_at: number;
   last_seen_at: number;
   resolved_at: number | null;
+  ignored_hash: string | null;
+  ignored_at: number | null;
+  resolution: IssueResolution | null;
+  expected_hash: string | null;
+  observed_hash: string | null;
   evidence: Record<string, unknown> | null;
   path_key: string;
   path_display_b64: string;
@@ -224,7 +258,7 @@ export interface Overview {
   machines: { total: number; online: number };
   mounts: { total: number; never_scanned?: number; stale_24h?: number };
   coverage: Coverage;
-  issues: { open: number; acked: number; ignored?: number; resolved?: number };
+  issues: { open: number; ignored: number };
   issues_by_type: { mismatch: number; missing: number; unreadable: number };
   issues_by_machine: Array<{ machine_id: string; open: number }>;
   jobs: { pending: number; running: number };
@@ -253,7 +287,7 @@ export interface MountDetail extends MountRef {
 export interface IssueDetail {
   id: number;
   type: string;
-  status: string;
+  status: IssueStatus;
   confidence: string;
   evidence: Record<string, unknown> | null;
   path_key: string;
@@ -264,6 +298,15 @@ export interface IssueDetail {
   expected_hash: string | null;
   observed_hash: string | null;
   repair_allowed: boolean;
+  ignored_hash: string | null;
+  ignored_at: number | null;
+  resolution: IssueResolution | null;
+  resolved_at: number | null;
+  repair_active: boolean;
+  can_rebaseline: boolean;
+  can_ignore: boolean;
+  can_unignore: boolean;
+  can_repair: boolean;
 }
 
 export interface Replica {
@@ -393,7 +436,7 @@ export interface RepairView {
 }
 
 export interface IssueSummary {
-  status: { open: number; acked: number; ignored: number; resolved: number };
+  status: { open: number; ignored: number; resolved: number };
   type: { mismatch: number; missing: number; unreadable: number };
   machines: Array<{ machine_id: string; open: number }>;
 }

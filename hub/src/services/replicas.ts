@@ -16,7 +16,17 @@ export interface IssueRepairContext {
   targetSize: number;
   expectedHash: string | null;
   observedHash: string | null;
+  trustedHash: string | null;
+  ignoredHash: string | null;
+  ignoredAt: number | null;
+  resolution: string | null;
+  resolvedAt: number | null;
   repairAllowed: boolean;
+  repairActive: boolean;
+  canRebaseline: boolean;
+  canIgnore: boolean;
+  canUnignore: boolean;
+  canRepair: boolean;
 }
 
 export interface ReplicaCandidate {
@@ -36,6 +46,10 @@ interface IssueRow {
   status: string;
   confidence: string;
   evidence_json: string | null;
+  ignored_hash: string | null;
+  ignored_at: number | null;
+  resolution: string | null;
+  resolved_at: number | null;
   target_path_pk: number;
   target_path_key: string;
   target_state: string;
@@ -52,6 +66,7 @@ export function getIssueRepairContext(db: Db, issueId: number): IssueRepairConte
   const row = db
     .prepare(
       `SELECT i.id AS issue_id, i.type, i.status, i.confidence, i.evidence_json,
+              i.ignored_hash, i.ignored_at, i.resolution, i.resolved_at,
               p.id AS target_path_pk, p.path_key AS target_path_key, p.state AS target_state,
               p.size AS target_size, p.content_hash AS target_hash,
               m.id AS mount_pk, m.mount_id, m.repair_allowed,
@@ -75,6 +90,32 @@ export function getIssueRepairContext(db: Db, issueId: number): IssueRepairConte
     }
   }
   const observed = evidence && typeof evidence.observed_hash === 'string' ? evidence.observed_hash : null;
+  const trusted = evidence && typeof evidence.trusted_hash === 'string' ? evidence.trusted_hash : null;
+  const repairActive =
+    db
+      .prepare(
+        "SELECT 1 FROM repair_jobs WHERE issue_pk = ? AND status IN ('pending','transferring','ready','applying') LIMIT 1",
+      )
+      .get(issueId) !== undefined;
+  const status = row.status;
+  const canRebaseline =
+    row.type === 'mismatch' &&
+    (status === 'open' || status === 'ignored') &&
+    observed !== null &&
+    row.target_hash !== null &&
+    trusted !== null &&
+    trusted === row.target_hash &&
+    row.target_state === 'active' &&
+    !repairActive;
+  const canIgnore = status === 'open' && (row.type !== 'mismatch' || observed !== null);
+  const canUnignore = status === 'ignored';
+  const canRepair =
+    (row.type === 'mismatch' || row.type === 'missing') &&
+    (status === 'open' || status === 'ignored') &&
+    row.repair_allowed === 1 &&
+    row.target_state === 'active' &&
+    row.target_hash !== null &&
+    !repairActive;
 
   return {
     issueId: row.issue_id,
@@ -92,7 +133,17 @@ export function getIssueRepairContext(db: Db, issueId: number): IssueRepairConte
     targetSize: row.target_size,
     expectedHash: row.target_hash,
     observedHash: observed,
+    trustedHash: trusted,
+    ignoredHash: row.ignored_hash,
+    ignoredAt: row.ignored_at,
+    resolution: row.resolution,
+    resolvedAt: row.resolved_at,
     repairAllowed: row.repair_allowed === 1,
+    repairActive,
+    canRebaseline,
+    canIgnore,
+    canUnignore,
+    canRepair,
   };
 }
 

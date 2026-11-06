@@ -352,19 +352,19 @@ function detectMissing(db: Db, mount: MountRow, job: JobRow, now: number): boole
       now,
       path.id,
     );
-    openIssue(
-      db,
-      path.id,
-      mount.id,
-      'missing',
-      'medium',
-      {
+    openIssue(db, {
+      pathPk: path.id,
+      mountPk: mount.id,
+      type: 'missing',
+      confidence: 'medium',
+      evidence: {
         job_id: job.id,
         last_seen_at: path.last_seen_at,
         last_seen_job_pk: path.last_seen_job_pk,
       },
+      observedHash: null,
       now,
-    );
+    });
   }
   return false;
 }

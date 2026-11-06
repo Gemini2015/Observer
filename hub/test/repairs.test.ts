@@ -146,6 +146,15 @@ describe('cross-machine repair', () => {
     const issue = openIssueFor(context, 'machine-beta');
     expect(issue.status).toBe('open');
 
+    const ignore = await context.app.inject({
+      method: 'POST',
+      url: `/api/v1/issues/${issue.id}/ignore`,
+      headers: { cookie },
+      payload: { observed_hash: sha256Of(broken) },
+    });
+    expect(ignore.statusCode).toBe(200);
+    expect(openIssueFor(context, 'machine-beta').status).toBe('ignored');
+
     const replicasResponse = await context.app.inject({
       method: 'GET',
       url: `/api/v1/issues/${issue.id}/replicas`,
@@ -223,7 +232,7 @@ describe('cross-machine repair', () => {
       url: `/api/v1/issues/${issue.id}`,
       headers: { cookie },
     });
-    expect((issueAfter.json() as { status: string }).status).toBe('resolved');
+    expect(issueAfter.json()).toMatchObject({ status: 'resolved', resolution: 'repaired' });
 
     const repairAfter = await context.app.inject({
       method: 'GET',

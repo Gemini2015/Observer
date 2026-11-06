@@ -5,6 +5,7 @@ import {
   confidence,
   fileState,
   isRepairTerminal,
+  issueResolution,
   issueStatus,
   issueType,
   jobMode,
@@ -36,8 +37,11 @@ describe('status maps cover backend enums', () => {
     for (const state of ['active', 'suspect', 'unavailable', 'removed']) {
       expect(labelOf(mountState, state).label).not.toBe(state);
     }
-    for (const status of ['open', 'acked', 'ignored', 'resolved']) {
+    for (const status of ['open', 'ignored', 'resolved']) {
       expect(labelOf(issueStatus, status).label).not.toBe(status);
+    }
+    for (const resolution of ['recovered', 'repaired', 'rebaselined']) {
+      expect(labelOf(issueResolution, resolution).label).not.toBe(resolution);
     }
     for (const status of ['pending', 'transferring', 'ready', 'applying', 'completed', 'failed', 'canceled']) {
       expect(labelOf(repairStatus, status).label).not.toBe(status);
@@ -67,6 +71,8 @@ describe('audit labels', () => {
   it('translates known actions and keeps unknown ones', () => {
     expect(auditActionLabel('job.create')).toBe('创建巡检任务');
     expect(auditActionLabel('repair.complete')).toBe('修复完成');
+    expect(auditActionLabel('issue.rebaseline')).toBe('确认更新基线');
+    expect(auditActionLabel('issue.ignore')).toBe('忽略异常');
     expect(auditActionLabel('unknown.action')).toBe('unknown.action');
     expect(auditActionLabel(null)).toBe('—');
   });

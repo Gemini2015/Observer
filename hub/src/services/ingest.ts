@@ -132,12 +132,8 @@ function applyEntry(
     }
     const trusted = existing?.content_hash ?? null;
     const observed = entry.hash;
-    const rebaseline = job.mode === 'baseline' && trusted !== null && trusted !== observed;
 
-    if (rebaseline) {
-      contentHash = observed;
-      if (existing) resolveIssue(db, existing.id, 'mismatch', now);
-    } else if (trusted === null) {
+    if (trusted === null) {
       contentHash = observed;
     } else if (trusted !== observed) {
       if (!existing) {
@@ -145,13 +141,12 @@ function applyEntry(
       }
       const unchangedStat =
         existing.size === entry.size && existing.mtime_ns === entry.mtime_ns;
-      openIssue(
-        db,
-        existing.id,
-        mount.id,
-        'mismatch',
-        unchangedStat ? 'high' : 'medium',
-        {
+      openIssue(db, {
+        pathPk: existing.id,
+        mountPk: mount.id,
+        type: 'mismatch',
+        confidence: unchangedStat ? 'high' : 'medium',
+        evidence: {
           job_id: job.id,
           trusted_hash: trusted,
           observed_hash: observed,
@@ -160,23 +155,32 @@ function applyEntry(
           previous_size: existing.size,
           previous_mtime_ns: existing.mtime_ns,
         },
+        observedHash: observed,
         now,
-      );
+      });
     } else if (existing) {
-      resolveIssue(db, existing.id, 'mismatch', now);
+      resolveIssue(db, existing.id, 'mismatch', { resolution: 'recovered', now });
     }
 
-    if (existing) resolveIssue(db, existing.id, 'unreadable', now);
+    if (existing) resolveIssue(db, existing.id, 'unreadable', { resolution: 'recovered', now });
     lastHashedAt = now;
     lastHashKind = 'hash';
   } else if (entry.status === 'unreadable') {
     if (existing) {
-      openIssue(db, existing.id, mount.id, 'unreadable', 'medium', { job_id: job.id }, now);
+      openIssue(db, {
+        pathPk: existing.id,
+        mountPk: mount.id,
+        type: 'unreadable',
+        confidence: 'medium',
+        evidence: { job_id: job.id },
+        observedHash: null,
+        now,
+      });
     }
   }
 
   if (wasMissing && existing) {
-    resolveIssue(db, existing.id, 'missing', now);
+    resolveIssue(db, existing.id, 'missing', { resolution: 'recovered', now });
   }
 
   if (existing) {

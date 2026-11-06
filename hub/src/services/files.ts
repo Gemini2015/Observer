@@ -340,7 +340,7 @@ export function getFileDetail(
     .prepare(
       `SELECT id, type, status, confidence, occurrences, first_seen_at, last_seen_at, evidence_json
        FROM issues WHERE path_pk = ?
-       ORDER BY CASE status WHEN 'open' THEN 0 WHEN 'acked' THEN 1 WHEN 'ignored' THEN 2 ELSE 3 END,
+       ORDER BY CASE status WHEN 'open' THEN 0 WHEN 'ignored' THEN 1 ELSE 2 END,
                 last_seen_at DESC, id DESC
        LIMIT 50`,
     )

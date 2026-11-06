@@ -2,7 +2,8 @@ import type { FastifyInstance } from 'fastify';
 import type { RouteContext } from './index.js';
 import { HttpError } from '../http/errors.js';
 import { requireSession } from '../http/auth.js';
-import { IdParam, RepairRequestSchema } from '../http/schemas.js';
+import { IdParam, IgnoreRequest, RebaselineRequest, RepairRequestSchema } from '../http/schemas.js';
+import { ignoreIssue, rebaselineIssue, unignoreIssue } from '../services/issue-actions.js';
 import { getIssueRepairContext, listReplicas } from '../services/replicas.js';
 import { createRepair, transfersPath } from '../services/repairs.js';
 
@@ -15,19 +16,22 @@ interface IssueListRow {
   first_seen_at: number;
   last_seen_at: number;
   resolved_at: number | null;
+  ignored_hash: string | null;
+  ignored_at: number | null;
+  resolution: string | null;
   evidence_json: string | null;
   path_key: string;
   path_display: Buffer;
+  expected_hash: string | null;
   mount_id: string;
   machine_id: string;
 }
 
-type IssueStatusKey = 'open' | 'acked' | 'ignored' | 'resolved';
+type IssueStatusKey = 'open' | 'ignored' | 'resolved';
 type IssueTypeKey = 'mismatch' | 'missing' | 'unreadable';
 
 const ALLOWED_STATUS: ReadonlySet<string> = new Set<IssueStatusKey>([
   'open',
-  'acked',
   'ignored',
   'resolved',
 ]);
@@ -42,6 +46,20 @@ function escapeLike(value: string): string {
   return value.replace(/[\\%_]/g, (match) => `\\${match}`);
 }
 
+function parseEvidence(value: string | null): Record<string, unknown> | null {
+  if (!value) return null;
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return parsed && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : null;
+  } catch {
+    return null;
+  }
+}
+
+function observedHashOf(evidence: Record<string, unknown> | null): string | null {
+  return evidence && typeof evidence.observed_hash === 'string' ? evidence.observed_hash : null;
+}
+
 export function registerIssueRoutes(app: FastifyInstance, ctx: RouteContext): void {
   app.get('/api/v1/issues/summary', async (request) => {
     requireSession(ctx.db, request);
@@ -49,7 +67,6 @@ export function registerIssueRoutes(app: FastifyInstance, ctx: RouteContext): vo
 
     const status: Record<IssueStatusKey, number> = {
       open: 0,
-      acked: 0,
       ignored: 0,
       resolved: 0,
     };
@@ -57,12 +74,7 @@ export function registerIssueRoutes(app: FastifyInstance, ctx: RouteContext): vo
       .prepare('SELECT status, COUNT(*) AS count FROM issues GROUP BY status')
       .all() as Array<{ status: string; count: number }>;
     for (const row of statusRows) {
-      if (
-        row.status === 'open' ||
-        row.status === 'acked' ||
-        row.status === 'ignored' ||
-        row.status === 'resolved'
-      ) {
+      if (row.status === 'open' || row.status === 'ignored' || row.status === 'resolved') {
         status[row.status] = row.count;
       }
     }
@@ -104,9 +116,11 @@ export function registerIssueRoutes(app: FastifyInstance, ctx: RouteContext): vo
 
     const conditions: string[] = [];
     const params: string[] = [];
-    if (query.status && ALLOWED_STATUS.has(query.status)) {
+    // 旧链接/旧客户端仍可能传 acked；映射到 ignored。
+    const requestedStatus = query.status === 'acked' ? 'ignored' : query.status;
+    if (requestedStatus && ALLOWED_STATUS.has(requestedStatus)) {
       conditions.push('i.status = ?');
-      params.push(query.status);
+      params.push(requestedStatus);
     }
     if (query.machine_id) {
       conditions.push('mc.machine_id = ?');
@@ -125,8 +139,10 @@ export function registerIssueRoutes(app: FastifyInstance, ctx: RouteContext): vo
     const rows = ctx.db
       .prepare(
         `SELECT i.id, i.type, i.status, i.confidence, i.occurrences,
-                i.first_seen_at, i.last_seen_at, i.resolved_at, i.evidence_json,
-                p.path_key, p.path_display, m.mount_id, mc.machine_id
+                i.first_seen_at, i.last_seen_at, i.resolved_at,
+                i.ignored_hash, i.ignored_at, i.resolution, i.evidence_json,
+                p.path_key, p.path_display, p.content_hash AS expected_hash,
+                m.mount_id, mc.machine_id
          FROM issues i
          JOIN paths p ON p.id = i.path_pk
          JOIN mounts m ON m.id = i.mount_pk
@@ -137,21 +153,29 @@ export function registerIssueRoutes(app: FastifyInstance, ctx: RouteContext): vo
       )
       .all(...params) as IssueListRow[];
 
-    return rows.map((row) => ({
-      id: row.id,
-      type: row.type,
-      status: row.status,
-      confidence: row.confidence,
-      occurrences: row.occurrences,
-      first_seen_at: row.first_seen_at,
-      last_seen_at: row.last_seen_at,
-      resolved_at: row.resolved_at,
-      evidence: row.evidence_json ? (JSON.parse(row.evidence_json) as unknown) : null,
-      path_key: row.path_key,
-      path_display_b64: Buffer.from(row.path_display).toString('base64'),
-      mount_id: row.mount_id,
-      machine_id: row.machine_id,
-    }));
+    return rows.map((row) => {
+      const evidence = parseEvidence(row.evidence_json);
+      return {
+        id: row.id,
+        type: row.type,
+        status: row.status,
+        confidence: row.confidence,
+        occurrences: row.occurrences,
+        first_seen_at: row.first_seen_at,
+        last_seen_at: row.last_seen_at,
+        resolved_at: row.resolved_at,
+        ignored_hash: row.ignored_hash,
+        ignored_at: row.ignored_at,
+        resolution: row.resolution,
+        expected_hash: row.expected_hash,
+        observed_hash: observedHashOf(evidence),
+        evidence,
+        path_key: row.path_key,
+        path_display_b64: Buffer.from(row.path_display).toString('base64'),
+        mount_id: row.mount_id,
+        machine_id: row.machine_id,
+      };
+    });
   });
 
   app.get('/api/v1/issues/:id', async (request) => {
@@ -173,6 +197,15 @@ export function registerIssueRoutes(app: FastifyInstance, ctx: RouteContext): vo
       expected_hash: context.expectedHash,
       observed_hash: context.observedHash,
       repair_allowed: context.repairAllowed,
+      ignored_hash: context.ignoredHash,
+      ignored_at: context.ignoredAt,
+      resolution: context.resolution,
+      resolved_at: context.resolvedAt,
+      repair_active: context.repairActive,
+      can_rebaseline: context.canRebaseline,
+      can_ignore: context.canIgnore,
+      can_unignore: context.canUnignore,
+      can_repair: context.canRepair,
     };
   });
 
@@ -200,29 +233,25 @@ export function registerIssueRoutes(app: FastifyInstance, ctx: RouteContext): vo
     return reply.code(202).send(result);
   });
 
-  app.post('/api/v1/issues/:id/ack', async (request) => {
+  app.post('/api/v1/issues/:id/rebaseline', async (request) => {
     requireSession(ctx.db, request);
     const issueId = IdParam.parse((request.params as { id: string }).id);
-    const info = ctx.db
-      .prepare("UPDATE issues SET status = 'acked', last_seen_at = ? WHERE id = ? AND status = 'open'")
-      .run(Date.now(), issueId);
-    if (info.changes === 0) {
-      throw new HttpError(404, 'issue not found or not open');
-    }
-    return { ok: true };
+    const body = RebaselineRequest.parse(request.body);
+    return rebaselineIssue(ctx.db, issueId, body.observed_hash);
   });
 
   app.post('/api/v1/issues/:id/ignore', async (request) => {
     requireSession(ctx.db, request);
     const issueId = IdParam.parse((request.params as { id: string }).id);
-    const info = ctx.db
-      .prepare(
-        "UPDATE issues SET status = 'ignored', last_seen_at = ? WHERE id = ? AND status IN ('open','acked')",
-      )
-      .run(Date.now(), issueId);
-    if (info.changes === 0) {
-      throw new HttpError(404, 'issue not found or not ignorable');
-    }
+    const body = IgnoreRequest.parse(request.body ?? {});
+    ignoreIssue(ctx.db, issueId, body.observed_hash ?? null);
+    return { ok: true };
+  });
+
+  app.post('/api/v1/issues/:id/unignore', async (request) => {
+    requireSession(ctx.db, request);
+    const issueId = IdParam.parse((request.params as { id: string }).id);
+    unignoreIssue(ctx.db, issueId);
     return { ok: true };
   });
 }

@@ -15,6 +15,7 @@ const ACTION_OPTIONS = [
   { value: 'repair.', label: '修复（repair.*）' },
   { value: 'transfer.', label: '传输（transfer.*）' },
   { value: 'scan.', label: '扫描（scan.*）' },
+  { value: 'issue.', label: '异常（issue.*）' },
   { value: 'scheduler.', label: '调度（scheduler.*）' },
   { value: 'enroll', label: '注册（enroll*）' },
   { value: 'agent.token.rotate', label: '令牌轮换' },
@@ -95,7 +96,7 @@ export default function AuditPage() {
             description={
               action
                 ? '换一个动作前缀看看。'
-                : '登录、创建任务、确认异常、发起修复等操作都会记录在这里。'
+                : '登录、创建任务、确认更新基线、忽略异常、发起修复等操作都会记录在这里。'
             }
           />
         ) : null}

@@ -156,16 +156,6 @@ export function listRepairs(db: Db, limit = 100): RepairView[] {
   return rows.map(toView);
 }
 
-function activeRepairExists(db: Db, issuePk: number): boolean {
-  return (
-    db
-      .prepare(
-        "SELECT 1 FROM repair_jobs WHERE issue_pk = ? AND status IN ('pending','transferring','ready','applying') LIMIT 1",
-      )
-      .get(issuePk) !== undefined
-  );
-}
-
 interface SourcePathRow {
   id: number;
   mount_pk: number;
@@ -217,7 +207,11 @@ export function createRepair(
 
   const context = getIssueRepairContext(db, issueId);
   if (!context) throw new HttpError(404, 'issue not found');
-  if (context.issueStatus !== 'open' && context.issueStatus !== 'acked') {
+  if (
+    context.issueStatus !== 'open' &&
+    context.issueStatus !== 'ignored' &&
+    context.issueStatus !== 'acked'
+  ) {
     throw new HttpError(409, 'issue is not open');
   }
   if (context.issueType !== 'mismatch' && context.issueType !== 'missing') {
@@ -229,7 +223,7 @@ export function createRepair(
   if (!context.expectedHash) {
     throw new HttpError(409, 'issue has no trusted hash');
   }
-  if (activeRepairExists(db, issueId)) {
+  if (context.repairActive) {
     throw new HttpError(409, 'repair already in progress');
   }
 
@@ -713,8 +707,8 @@ export function reportRepairResult(
     db.prepare(
       "INSERT INTO observations (path_pk, hash, algo, kind, observed_at) VALUES (?, ?, 'sha256', 'repair', ?)",
     ).run(row.target_path_pk, row.expected_hash, now);
-    resolveIssue(db, row.target_path_pk, 'mismatch', now);
-    resolveIssue(db, row.target_path_pk, 'missing', now);
+    resolveIssue(db, row.target_path_pk, 'mismatch', { resolution: 'repaired', now });
+    resolveIssue(db, row.target_path_pk, 'missing', { resolution: 'repaired', now });
     db.prepare(
       "UPDATE repair_jobs SET status = 'completed', error = NULL, quarantine_path = NULL, updated_at = ?, finished_at = ? WHERE id = ?",
     ).run(now, now, repairId);

@@ -49,9 +49,14 @@ export const issueType: LabelMap = {
 
 export const issueStatus: LabelMap = {
   open: { label: '待确认', tone: 'warn' },
-  acked: { label: '已确认', tone: 'info' },
   ignored: { label: '已忽略', tone: 'neutral' },
   resolved: { label: '已解决', tone: 'ok' },
+};
+
+export const issueResolution: LabelMap = {
+  recovered: { label: '已恢复', tone: 'ok' },
+  repaired: { label: '已修复', tone: 'ok' },
+  rebaselined: { label: '已更新基线', tone: 'info' },
 };
 
 export const confidence: LabelMap = {
@@ -94,6 +99,7 @@ export const hashKind: LabelMap = {
 };
 
 export const observationKind: LabelMap = {
+  baseline: { label: '基线', tone: 'info' },
   scan: { label: '巡检', tone: 'neutral' },
   repair: { label: '修复', tone: 'info' },
 };
@@ -146,6 +152,11 @@ const auditActions: Record<string, string> = {
   'transfer.failed': '传输失败',
   'scan.bulk': '批量扫描',
   'scheduler.tick': '调度轮询',
+  'issue.rebaseline': '确认更新基线',
+  'issue.ignore': '忽略异常',
+  'issue.unignore': '取消忽略',
+  'issue.resolve': '异常解决',
+  'issue.reopen': '异常重新打开',
 };
 
 export function auditActionLabel(action: string | null | undefined): string {
@@ -162,4 +173,5 @@ export function actorLabel(actor: string | null | undefined): string {
 }
 
 /** 用于「已解决」等系统行为的解释文案。 */
-export const RESOLVE_HINT = '异常在后续巡检复核一致后会自动变为已解决。';
+export const RESOLVE_HINT =
+  '异常在后续巡检复核一致、修复完成或确认更新基线后变为已解决。';

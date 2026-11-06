@@ -78,6 +78,14 @@ export const RepairRequestSchema = z.object({
   source_path_id: z.number().int().positive(),
 });
 
+export const RebaselineRequest = z.object({
+  observed_hash: z.string().regex(sha256Pattern),
+});
+
+export const IgnoreRequest = z.object({
+  observed_hash: z.string().regex(sha256Pattern).optional(),
+});
+
 export const TransferFailSchema = z.object({
   reason: z.string().max(500).default('source upload failed'),
 });
