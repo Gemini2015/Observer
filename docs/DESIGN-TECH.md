@@ -331,7 +331,7 @@ hub 记录 `min_agent_version`；低于则返回 `426`，agent 提示升级但�
 | mounts | machine_pk, mount_id, label, physical_path, sentinel, fs_kind, flags, include, exclude, rules_hash, limits, schedule, state, manifest_epoch, updated_at | 逻辑挂载点 |
 | paths | mount_pk, path_key, path_display(BLOB), size, mtime_ns(字符串), content_hash, volume_id, last_seen_job_pk, last_seen_at, last_hashed_at, last_hash_kind, state, change_epoch, updated_at | 当前状态，`(mount_pk, path_key)` 唯一 |
 | observations | path_pk, hash, algo, kind(baseline/scan/repair), observed_at | 仅哈希事件 |
-| issues | path_pk, mount_pk, type(mismatch/missing/unreadable), status, confidence, evidence, occurrences, first_seen_at, last_seen_at, resolved_at | 异常；`(path_pk, type)` 唯一，恢复后重置不新开行 |
+| issues | path_pk, mount_pk, type(mismatch/missing/unreadable), status(open/ignored/resolved), confidence, evidence, ignored_hash, ignored_at, resolution, occurrences, first_seen_at, last_seen_at, resolved_at | 异常；`(path_pk, type)` 唯一，恢复后重置不新开行 |
 | scan_jobs | mount_pk, mode, status, rules_hash, lease_until, attempt, cancel_requested, stats, timestamps | 任务；每 mount 仅一个活跃任务 |
 | scan_batches | job_pk, seq, received_at | 幂等去重 |
 | transfer_tickets | repair_pk, expected_hash, size, expires_at | 中转 |
@@ -344,6 +344,7 @@ hub 记录 `min_agent_version`；低于则返回 `426`，agent 提示升级但�
 - 时间约定：epoch 毫秒；`mtime_ns` 用十进制字符串（防 JS 精度丢失）；`path_display` 存 BLOB，wire 上再 base64。
 - 关键约束：每 mount 仅一个活跃任务（partial unique index）、每路径每类异常一条生命周期记录（`UNIQUE(path_pk,type)`）、路径增量靠 `change_epoch`（与 `mounts.manifest_epoch` 同事务自增）。
 - 索引：`paths(content_hash)`、`paths(mount_pk,state,last_hashed_at)`、`paths(mount_pk,last_seen_job_pk)`、`paths(mount_pk,change_epoch)`、`scan_jobs(status,lease_until)`、`audit_log(at)`。
+- 遗留值：`issues.status` 的 CHECK 仍允许 `acked`，仅用于兼容旧库；迁移 0004 会把 `acked` 统一转为 `ignored`，应用不再写入。
 
 ## 8. 关键流程
 
@@ -354,6 +355,7 @@ hub 记录 `min_agent_version`；低于则返回 `426`，agent 提示升级但�
 3. agent 做 mountguard 预检（sentinel、可达性）；
 4. 派发 `baseline` job → 全量哈希 → 批次入库 → 完成；
 5. 覆盖率 = 已哈希路径 / 纳入路径。
+6. baseline 只负责首次建立基线；对已有 `content_hash` 的路径，即使以 baseline 模式巡检也不会自动覆盖基线，而是按普通巡检报异常，由用户逐条「确认更新」。
 
 ### 8.2 周期巡检
 
@@ -364,18 +366,22 @@ hub 记录 `min_agent_version`；低于则返回 `426`，agent 提示升级但�
 
 ### 8.3 异常判定与置信度
 
-- `mismatch`（哈希与上一次可信观测不同）：默认高置信；若该轮同时出现大量变化（群组异常），降级为"疑似批量变更"，不自动关闭。
+- `mismatch`（哈希与当前可信基线不同）：默认高置信；若该轮同时出现大量变化（群组异常），降级为"疑似批量变更"，不自动关闭。
 - `missing`：扫描完整完成后仍未见，且 mount 状态正常、非规则变更导致 → 中置信。
 - `unreadable`：权限/IO 错误 → 单独类型。
 - 置信度与依据（上次哈希时间、其他机器副本、是否 mtime 同时变化）写入 `evidence`，供 UI 解释。
-- 文件恢复且哈希与可信观测一致 → 自动关闭异常。
+- 文件恢复且哈希与可信基线一致 → 自动关闭异常；修复完成同样自动关闭。
+- **确认更新**：用户接受最近一次观测 hash `O` 为新基线（`paths.content_hash=O`），异常直接 `resolved`，`resolution='rebaselined'`；后续巡检以 `O` 为准。
+- **忽略**：记录当前观测 hash `I`；仅当 `status='ignored'` 时，巡检 `O==I` 不重复报；`O==基线` 自动 `resolved`；`O∉{基线,I}` 重新打开并累加 occurrences。
+- 普通增量/全量巡检不自动接受变更；baseline 只用于首次建立基线，已有基线不会被自动覆盖。
 
 ### 8.4 修复
 
 1. 用户在 Web 选源/目标 → hub 校验（同内容、源可信、目标 mount 允许写）；
 2. 创建票据 → 源 agent 上传（分块续传）→ 目标 agent 下载并校验 → quarantine → 原子替换；
 3. 替换成功后目标端重新哈希并上报 → 与期望一致则关闭异常，否则报修复失败；
-4. 全程审计。
+4. ignored 异常也可以发起修复；修复成功进入 `resolved`，`resolution='repaired'`；
+5. 全程审计。
 
 ### 8.5 规则变更
 
