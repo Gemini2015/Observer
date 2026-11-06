@@ -302,11 +302,11 @@
   flex: none;
 }
 
-/* ========== 表格 ========== */
+/* ========== 表格 ==========
+   单层滚动契约：.view-scroll / .setup-view 是页面唯一的纵向滚动容器。
+   页面内表格不得再设置 max-height + overflow 纵向滚动；窄窗口只保留横向滚动。 */
 .table-wrap {
-  max-height: calc(100vh - 300px);
-  min-height: 180px;
-  overflow: auto;
+  overflow: visible;
   border-radius: var(--radius-md);
   scrollbar-color: var(--color-border-strong) transparent;
 }
@@ -352,6 +352,38 @@
 
 .table--files {
   min-width: 900px;
+}
+
+/* 窄窗口：隐藏次要的「最后发现」列让表格收缩到可用宽度；
+   极端情况下仍只保留横向兜底，不产生第二层纵向滚动。 */
+@media (max-width: 980px) {
+  .table-wrap {
+    overflow-x: auto;
+    overflow-y: hidden;
+  }
+
+  .table-wrap .table th {
+    position: static;
+  }
+
+  .table--files {
+    min-width: 0;
+  }
+
+  .table--files th:nth-child(5),
+  .table--files td:nth-child(5) {
+    display: none;
+  }
+}
+
+/* 抽屉宽度固定，表格在抽屉内横向滚动；纵向只由 drawer-body 滚动 */
+.drawer-body .table-wrap {
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.drawer-body .table-wrap .table th {
+  position: static;
 }
 
 .cell-sub {
@@ -759,6 +791,7 @@ textarea {
   justify-content: center;
   padding: 12vh 16px 16px;
   overflow: auto;
+  overscroll-behavior: contain;
   background: rgba(2, 6, 23, 0.62);
   animation: fade-in 0.12s ease-out;
 }
@@ -842,6 +875,7 @@ textarea {
   gap: var(--space-4);
   padding: var(--space-4);
   overflow: auto;
+  overscroll-behavior: contain;
 }
 
 .drawer-foot {
@@ -906,10 +940,10 @@ textarea {
 }
 
 .code-block {
-  max-height: 260px;
   margin: 0;
   padding: 10px 12px;
-  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
   border-radius: var(--radius-md);
   background: var(--color-bg);
   color: var(--color-text-muted);

@@ -49,7 +49,7 @@
 
 - 设计令牌与 hub 同名（dark 值）：颜色、间距、字号、圆角、阴影、焦点环。
 - 基础组件类：按钮/徽章/面板/KPI/指标/表格/表单/chips/空态/Toast/对话框/抽屉/进度条/挂载点卡片。
-- 深色标题栏（Wails `WindowsWindow.Theme=Dark`）；主区域 flex + 内部滚动，footer 固定；880×640 最小窗口可用。
+- 深色标题栏（Wails `WindowsWindow.Theme=Dark`）；主区域 flex + 页面单层滚动，footer 固定；880×640 最小窗口可用。
 - 键盘：tabs 使用 `role=tablist/tab` + 方向键（UIA 已识别为 TabItem）、详情用按钮、Esc 关闭抽屉/对话框并还原焦点、`:focus-visible` 焦点环、`prefers-reduced-motion`。
 - 反馈：Toast（`aria-live`）、按钮 busy、复制/保存/暂停/同步结果均有提示；错误全局兜底（`error`/`unhandledrejection` → Toast）。
 - 真实状态：不确定进度条 + 真实计数，而不是固定 35% 的假进度。
@@ -60,6 +60,17 @@
 - 删除未引用模板资源（`bg-desktop.jpg`、`bg-mobile.jpg`、`Inter-Medium.ttf`、`wails.png`、`javascript.svg`、`public/style.css`、字体许可），exe 约减小 660 KB。
 - 前端加 vitest（17 项）：平台路径、格式化、标签映射。
 - `RunOnce` 签名变更同步 CLI 与内部循环；Go 侧新增 controller 单测（空闲不清统计、错误保留、连接状态、暂停、立即同步）。
+
+### 单层滚动（2026-11-06 补充）
+
+**问题**：`.view-scroll` 是页面纵向滚动容器，但 `.table-wrap` 又设置了 `max-height: calc(100vh - 300px) + overflow:auto`，状态页最近任务、文件列表和抽屉表格都出现第二条纵向滚动条；抽屉证据 JSON 还有第三条。
+
+**处理**：
+- **页面是唯一纵向滚动容器**：`.view-scroll` / `.setup-view` 明确 `overflow-y:auto; overflow-x:hidden`，表格删除 `max-height/min-height`，随内容展开。
+- **正常宽度保留表头吸附**：`.table-wrap` 默认 `overflow:visible`，`table th` 相对页面滚动容器 sticky；窄窗口（≤980px）隐藏文件表的「最后发现」次要列、表格按可用宽度收缩，并关闭 sticky，只保留横向滚动兜底。
+- **抽屉单层滚动**：`.drawer-body` 是抽屉唯一滚动体；抽屉内表格只横向滚动，code block 删除 `max-height` 并改为 `pre-wrap`，不再内滚。
+- **滚动链收口**：页面/抽屉/对话框加 `overscroll-behavior: contain`；在 CSS 表格段写明「页面内表格禁止再设 max-height 纵向滚动」的契约。
+- **验证**：状态页/文件页在 1100×800 与 880×640 下均只有一条纵向 scrollbar；窄窗口文件表隐藏「最后发现」列后完整显示其余列，不再出现内层滚动条；抽屉只滚动抽屉体。截图保存在 `data/desktop-shots/`。
 
 ## 4. 设计决策
 
@@ -116,7 +127,7 @@ cd agent; go test ./...
 - 文件页：搜索 `DT_Cart` 命中 1 条，chips/分页同步；详情抽屉展示完整路径、状态、mtime、SHA-256、异常与观测，Esc/关闭可退。
 - 设置页：修改显示名触发「有未保存的修改」，切换标签弹出「放弃未保存的修改？」；取消后保持编辑态，未写入配置。
 - 首次向导（临时 `-config`）：编号分区、token 掩码、保存按钮在缺少 token 时为 disabled、`识别已有节点` 可用；未提交任何配置。
-- 880×640 最小窗口：header 换行、KPI 折行、表格容器内滚动、footer 正常。
+- 880×640 最小窗口：header 换行、KPI 折行、仅页面一条纵向滚动条；文件表隐藏「最后发现」列后完整显示其余列，footer 正常。
 
 ## 7. 未做/后续
 
