@@ -4,6 +4,7 @@ package main
 import (
 	"context"
 	"embed"
+	"errors"
 	"flag"
 	"log"
 	"os"
@@ -43,16 +44,21 @@ type RunSummary struct {
 
 // Status 通过 Wails 事件推送给前端。
 type Status struct {
-	MachineID  string                 `json:"machine_id"`
-	Hub        string                 `json:"hub"`
-	Paused     bool                   `json:"paused"`
-	Running    bool                   `json:"running"`
-	Connected  bool                   `json:"connected"`
-	LastError  string                 `json:"last_error"`
-	LastRunAt  int64                  `json:"last_run_at"`
-	LastStats  *RunSummary            `json:"last_stats"`
-	Current    *agentcore.CurrentJob  `json:"current"`
-	RecentJobs []hubclient.JobSummary `json:"recent_jobs"`
+	MachineID          string                 `json:"machine_id"`
+	Hub                string                 `json:"hub"`
+	Version            string                 `json:"version"`
+	Paused             bool                   `json:"paused"`
+	Running            bool                   `json:"running"`
+	Connected          bool                   `json:"connected"`
+	LastError          string                 `json:"last_error"`
+	LastErrorAt        int64                  `json:"last_error_at"`
+	LastOkAt           int64                  `json:"last_ok_at"`
+	LastRunAt          int64                  `json:"last_run_at"`
+	LastStats          *RunSummary            `json:"last_stats"`
+	Current            *agentcore.CurrentJob  `json:"current"`
+	RecentJobs         []hubclient.JobSummary `json:"recent_jobs"`
+	Autostart          bool                   `json:"autostart"`
+	AutostartSupported bool                   `json:"autostart_supported"`
 }
 
 type controller struct {
@@ -63,6 +69,11 @@ type controller struct {
 	app    *application.App
 	window *application.WebviewWindow
 	paused bool
+	wake   chan struct{}
+
+	pauseItem     *application.MenuItem
+	autostartItem *application.MenuItem
+	menu          *application.Menu
 
 	configPath    string
 	setup         SetupState
@@ -104,9 +115,16 @@ func main() {
 		cfg:        cfg,
 		configPath: absoluteConfig,
 		setup:      setupState,
+		wake:       make(chan struct{}, 1),
+	}
+	c.status = Status{
+		Version:            version.Version,
+		Autostart:          autostartEnabled(),
+		AutostartSupported: runtime.GOOS == "windows",
 	}
 	if cfg != nil {
-		c.status = Status{MachineID: cfg.Agent.MachineID, Hub: cfg.Agent.Hub}
+		c.status.MachineID = cfg.Agent.MachineID
+		c.status.Hub = cfg.Agent.Hub
 	}
 
 	var cancel context.CancelFunc
@@ -153,10 +171,18 @@ func main() {
 		Title:            windowTitle,
 		Width:            1100,
 		Height:           800,
+		MinWidth:         880,
+		MinHeight:        640,
 		BackgroundColour: application.NewRGB(15, 23, 42),
-		URL:              "/",
+		Windows: application.WindowsWindow{
+			Theme: application.Dark,
+		},
+		URL: "/",
 	})
 	c.window = window
+	if cfg != nil {
+		window.SetTitle("Observer Agent · " + cfg.Agent.MachineID)
+	}
 	window.RegisterHook(events.Common.WindowClosing, func(event *application.WindowEvent) {
 		event.Cancel()
 		window.Hide()
@@ -184,6 +210,13 @@ func main() {
 			log.Printf("打开浏览器失败: %v", err)
 		}
 	})
+	menu.Add("立即同步").OnClick(func(ctx *application.Context) {
+		if err := c.scanNow(); err != nil {
+			window.Show()
+			window.Focus()
+			c.setError(err)
+		}
+	})
 	pauseItem := menu.Add("暂停巡检")
 	pauseItem.OnClick(func(ctx *application.Context) {
 		c.mu.Lock()
@@ -194,23 +227,15 @@ func main() {
 			window.Focus()
 			return
 		}
-		c.mu.Lock()
-		c.paused = !c.paused
-		paused := c.paused
-		c.mu.Unlock()
-		if paused {
-			pauseItem.SetLabel("继续巡检")
-		} else {
-			pauseItem.SetLabel("暂停巡检")
-		}
-		menu.Update()
+		c.setPaused(!c.isPaused())
 	})
 	menu.AddSeparator()
-	autostartItem := menu.AddCheckbox("开机启动", autostartEnabled())
+	autostartItem := menu.AddCheckbox("开机启动", c.status.Autostart)
 	autostartItem.OnClick(func(ctx *application.Context) {
 		enabled := ctx.ClickedMenuItem().Checked()
-		if err := setAutostart(enabled, absoluteConfig); err != nil {
+		if err := c.setAutostart(enabled); err != nil {
 			log.Printf("设置开机启动失败: %v", err)
+			c.refreshTray()
 		}
 	})
 	menu.AddSeparator()
@@ -218,6 +243,12 @@ func main() {
 		app.Quit()
 	})
 	tray.SetMenu(menu)
+
+	c.mu.Lock()
+	c.pauseItem = pauseItem
+	c.autostartItem = autostartItem
+	c.menu = menu
+	c.mu.Unlock()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	c.appCtx = ctx
@@ -240,6 +271,151 @@ func (c *controller) currentHub() string {
 		return ""
 	}
 	return c.cfg.Agent.Hub
+}
+
+func (c *controller) isPaused() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.paused
+}
+
+// setPaused 切换暂停状态，并同步托盘文案与前端。
+func (c *controller) setPaused(paused bool) {
+	c.mu.Lock()
+	c.paused = paused
+	c.status.Paused = paused
+	c.mu.Unlock()
+	c.refreshTray()
+	c.emit()
+}
+
+func (c *controller) refreshTray() {
+	c.mu.Lock()
+	paused := c.paused
+	autostart := c.status.Autostart
+	pauseItem := c.pauseItem
+	autostartItem := c.autostartItem
+	menu := c.menu
+	c.mu.Unlock()
+
+	if pauseItem != nil {
+		if paused {
+			pauseItem.SetLabel("继续巡检")
+		} else {
+			pauseItem.SetLabel("暂停巡检")
+		}
+	}
+	if autostartItem != nil {
+		autostartItem.SetChecked(autostart)
+	}
+	if menu != nil {
+		menu.Update()
+	}
+}
+
+// scanNow 唤醒 runLoop 立即执行一轮；未初始化/暂停/扫描中会返回错误。
+func (c *controller) scanNow() error {
+	c.mu.Lock()
+	runner := c.runner
+	paused := c.paused
+	c.mu.Unlock()
+	if runner == nil {
+		return errors.New("agent 尚未连接，请等待初始化完成")
+	}
+	if paused {
+		return errors.New("巡检已暂停，请先继续巡检")
+	}
+	if runner.CurrentJob() != nil {
+		return errors.New("巡检正在进行中")
+	}
+	select {
+	case c.wake <- struct{}{}:
+	default:
+	}
+	return nil
+}
+
+func (c *controller) setAutostart(enabled bool) error {
+	if err := setAutostart(enabled, c.configPath); err != nil {
+		return err
+	}
+	c.mu.Lock()
+	c.status.Autostart = enabled
+	c.mu.Unlock()
+	c.refreshTray()
+	c.emit()
+	return nil
+}
+
+func (c *controller) setError(err error) {
+	if err == nil {
+		return
+	}
+	c.mu.Lock()
+	c.status.LastError = err.Error()
+	c.status.LastErrorAt = time.Now().UnixMilli()
+	c.mu.Unlock()
+	c.emit()
+}
+
+// recordPoll 记录一次与 hub 的轮询结果（用于连接徽章与「最后通信」）。
+func (c *controller) recordPoll(err error, now int64) {
+	c.mu.Lock()
+	if err != nil {
+		c.status.Connected = false
+		c.status.LastError = err.Error()
+		c.status.LastErrorAt = now
+	} else {
+		c.status.Connected = true
+		c.status.LastOkAt = now
+	}
+	c.mu.Unlock()
+}
+
+// recordRun 记录一轮 RunOnce 的结果：空闲轮询不清空统计/错误。
+func (c *controller) recordRun(ran bool, stats scan.Stats, err error, now int64) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if err != nil {
+		c.status.LastError = err.Error()
+		c.status.LastErrorAt = now
+		if ran {
+			c.status.LastRunAt = now
+		}
+		return
+	}
+	if !ran {
+		return
+	}
+	c.status.Connected = true
+	c.status.LastOkAt = now
+	c.status.LastRunAt = now
+	c.status.LastError = ""
+	c.status.LastErrorAt = 0
+	c.status.LastStats = summarize(stats)
+}
+
+func (c *controller) snapshot() Status {
+	c.mu.Lock()
+	snapshot := c.status
+	runner := c.runner
+	c.mu.Unlock()
+	if runner != nil {
+		snapshot.Current = runner.CurrentJob()
+	}
+	snapshot.Running = snapshot.Current != nil
+	return snapshot
+}
+
+func (c *controller) openConfigFolder() error {
+	return openPath(filepath.Dir(c.configPath))
+}
+
+func (c *controller) quit() {
+	if c.app != nil {
+		c.app.Quit()
+	}
 }
 
 // startRunner 启动一个新的 runner（设置保存后也会调用）。
@@ -303,24 +479,28 @@ func (c *controller) applyConfig(cfg *config.Config, state SetupState) {
 	c.status.MachineID = cfg.Agent.MachineID
 	c.status.Hub = cfg.Agent.Hub
 	c.status.LastError = ""
+	c.status.LastErrorAt = 0
+	c.status.LastOkAt = 0
+	c.status.LastRunAt = 0
+	c.status.LastStats = nil
 	c.status.Connected = false
+	c.status.Paused = c.paused
 	parent := c.appCtx
 	started := c.runnerStarted
 	c.mu.Unlock()
 
 	if c.window != nil {
-		c.window.SetTitle("Observer Agent")
+		c.window.SetTitle("Observer Agent · " + cfg.Agent.MachineID)
 	}
 	if c.app != nil {
 		c.app.Event.Emit("setup", state)
 	}
 	if started {
 		c.restartRunner()
-		return
-	}
-	if parent != nil {
+	} else if parent != nil {
 		c.startRunner(parent)
 	}
+	c.emit()
 }
 
 // start 在 Wails 应用启动后再初始化 runner（避免第二个实例争抢 SQLite 锁）。
@@ -341,10 +521,8 @@ func (c *controller) start(ctx context.Context, done chan struct{}) {
 
 	runner, err := agentcore.New(cfg, version.Version)
 	if err != nil {
-		c.mu.Lock()
-		c.status.LastError = err.Error()
-		c.mu.Unlock()
 		log.Printf("初始化 agent 失败: %v", err)
+		c.setError(err)
 		return
 	}
 	defer runner.Close()
@@ -372,46 +550,32 @@ func (c *controller) runLoop(ctx context.Context) {
 
 		c.mu.Lock()
 		paused := c.paused
-		c.mu.Unlock()
-
-		c.mu.Lock()
 		runner := c.runner
 		c.mu.Unlock()
 		if runner == nil {
 			return
 		}
 
-		// 任务历史独立于暂停状态刷新；失败时保留旧值。
-		if jobs, err := runner.RecentJobs(ctx, 20); err == nil {
+		// 任务历史与连接状态独立于暂停状态刷新；失败时保留旧的任务列表。
+		now := time.Now().UnixMilli()
+		jobs, jobsErr := runner.RecentJobs(ctx, 20)
+		c.recordPoll(jobsErr, now)
+		if jobsErr == nil {
 			c.mu.Lock()
 			c.status.RecentJobs = jobs
 			c.mu.Unlock()
 		}
 
 		if !paused {
-			c.mu.Lock()
-			c.status.Running = true
-			c.mu.Unlock()
-
-			stats, err := runner.RunOnce(ctx)
-
-			c.mu.Lock()
-			c.status.Running = false
-			c.status.LastRunAt = time.Now().UnixMilli()
-			if err != nil {
-				c.status.Connected = false
-				c.status.LastError = err.Error()
-			} else {
-				c.status.Connected = true
-				c.status.LastError = ""
-				c.status.LastStats = summarize(stats)
-			}
-			c.mu.Unlock()
+			stats, ran, err := runner.RunOnce(ctx)
+			c.recordRun(ran, stats, err, time.Now().UnixMilli())
 		}
 
 		select {
 		case <-ctx.Done():
 			return
+		case <-c.wake:
+			// 立即巡检：跳过本轮等待。
 		case <-time.After(interval):
 		}
 	}
@@ -435,14 +599,7 @@ func (c *controller) emit() {
 	if c.app == nil {
 		return
 	}
-	c.mu.Lock()
-	snapshot := c.status
-	runner := c.runner
-	c.mu.Unlock()
-	if runner != nil {
-		snapshot.Current = runner.CurrentJob()
-	}
-	c.app.Event.Emit("status", snapshot)
+	c.app.Event.Emit("status", c.snapshot())
 }
 
 func summarize(stats scan.Stats) *RunSummary {
@@ -466,5 +623,16 @@ func openBrowser(url string) error {
 		return exec.Command("open", url).Start()
 	default:
 		return exec.Command("xdg-open", url).Start()
+	}
+}
+
+func openPath(path string) error {
+	switch runtime.GOOS {
+	case "windows":
+		return exec.Command("explorer.exe", path).Start()
+	case "darwin":
+		return exec.Command("open", path).Start()
+	default:
+		return exec.Command("xdg-open", path).Start()
 	}
 }

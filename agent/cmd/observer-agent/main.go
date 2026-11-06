@@ -118,11 +118,11 @@ func cmdScan(args []string) int {
 		return fail(err)
 	}
 
-	stats, err := runner.RunOnce(ctx)
+	stats, ran, err := runner.RunOnce(ctx)
 	if err != nil {
 		return fail(err)
 	}
-	if stats.Batches == 0 && stats.Seen == 0 && stats.Skipped == 0 {
+	if !ran {
 		fmt.Println("没有可执行的任务（spool 已补发、心跳正常）")
 		return 0
 	}

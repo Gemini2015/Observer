@@ -293,34 +293,35 @@ func (r *Runner) saveToken(cachedPath, token string) error {
 }
 
 // RunOnce 执行一轮：补发 spool → 心跳 → 清单同步 → 执行任务（如有）。
-func (r *Runner) RunOnce(ctx context.Context) (scan.Stats, error) {
+// 第二个返回值表示本轮是否真正执行了巡检任务（用于区分空闲轮询）。
+func (r *Runner) RunOnce(ctx context.Context) (scan.Stats, bool, error) {
 	if r.agentToken() == "" {
 		if err := r.EnsureToken(ctx, os.Getenv("OBSERVER_ENROLL_TOKEN")); err != nil {
-			return scan.Stats{}, err
+			return scan.Stats{}, false, err
 		}
 	}
 
 	if err := r.ensureMountsSynced(ctx); err != nil {
-		return scan.Stats{}, err
+		return scan.Stats{}, false, err
 	}
 
 	r.flushSpool(ctx)
 
 	beat, err := r.Client.Heartbeat(ctx, r.agentToken(), hubclient.HeartbeatRequest{AgentVersion: r.Version})
 	if err != nil {
-		return scan.Stats{}, fmt.Errorf("heartbeat: %w", err)
+		return scan.Stats{}, false, fmt.Errorf("heartbeat: %w", err)
 	}
 	if err := r.syncManifests(ctx, beat); err != nil {
-		return scan.Stats{}, fmt.Errorf("manifest sync: %w", err)
+		return scan.Stats{}, false, fmt.Errorf("manifest sync: %w", err)
 	}
 	r.processRepairs(ctx, beat)
 	if beat.Job == nil {
-		return scan.Stats{}, nil
+		return scan.Stats{}, false, nil
 	}
 
 	mount, ok := r.findMount(beat.Job.MountID)
 	if !ok {
-		return scan.Stats{}, fmt.Errorf("hub dispatched unknown mount %q", beat.Job.MountID)
+		return scan.Stats{}, false, fmt.Errorf("hub dispatched unknown mount %q", beat.Job.MountID)
 	}
 
 	job := scan.Job{
@@ -347,7 +348,7 @@ func (r *Runner) RunOnce(ctx context.Context) (scan.Stats, error) {
 		Now:        r.Now,
 		Progress:   r.updateProgress,
 	})
-	return stats, err
+	return stats, true, err
 }
 
 // processRepairs 处理心跳下发的修复中转/应用任务（每轮最多各一个）。
@@ -370,7 +371,7 @@ func (r *Runner) Run(ctx context.Context, interval time.Duration) error {
 		interval = 15 * time.Second
 	}
 	for {
-		if _, err := r.RunOnce(ctx); err != nil && !errors.Is(err, context.Canceled) {
+		if _, _, err := r.RunOnce(ctx); err != nil && !errors.Is(err, context.Canceled) {
 			fmt.Fprintf(os.Stderr, "observer-agent: %v\n", err)
 		}
 		select {
