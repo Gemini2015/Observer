@@ -89,11 +89,15 @@ docker run --rm -v "${PWD}:/src" -w /src golang:1.27-bookworm \
 - 扩展新平台：在 `scripts/build-release.sh` 里增加一行 `build_target <os> <arch>` 并验证产物；需要签名/打包安装器的产物（桌面端 GUI、NSIS、macOS 公证）不在此流程，见 DEPLOY。
 - **不在本流程范围**：hub/web 构建与测试、hub Docker 镜像发布、桌面端 GUI/安装包、macOS 签名公证、armv7 产物、自动打 tag、版本号自动 bump。
 
-## 9. 首次验证记录
+## 9. 发布记录
 
-- 2026-11-11：推送临时预发布 tag `v0.0.0-rc.1` 试发布通过。
+- 2026-11-11：推送临时预发布 tag `v0.0.0-rc.1` 试发布通过（流水线验证用）。
   - Actions run `Release agent`（run 42970564475）成功；
   - GitHub Release 为 **pre-release**，标题 `observer-agent v0.0.0-rc.1`，含 3 个归档 + `SHA256SUMS`；
   - 下载资产 `sha256sum -c` 全部通过（与 GitHub 页面 digest 一致）；
   - linux/amd64 二进制为静态 ELF，`observer-agent version` 输出 `0.0.0-rc.1`；windows zip 内容为 `observer-agent.exe` + `agent.example.yaml`。
-- 该 tag/Release 仅用于流水线验证，正式版本请开发者按 §1 手动打新的 `vX.Y.Z` tag。
+- 2026-11-11：正式发布 `v1.0.0`（tag 指向 `05d393e`）。
+  - Actions run `Release agent`（run 42971796798）成功；
+  - GitHub Release 标题 `observer-agent v1.0.0`，标记 **Latest**（非 pre-release），含 3 个归档 + `SHA256SUMS`；
+  - 下载资产 `sha256sum -c` 全部通过，linux/amd64 `observer-agent version` 输出 `1.0.0`，静态链接检查通过。
+- `v0.0.0-rc.1` 仅用于流水线验证，可在 Release 页面删除；正式版本始终由开发者按 §1 手动打 `vX.Y.Z` tag。
