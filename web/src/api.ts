@@ -284,6 +284,63 @@ export interface MountDetail extends MountRef {
   last_job: Job | null;
 }
 
+/** 最近一轮巡检中未出现的已知文件（挂载点熔断时不逐文件报异常）。 */
+export interface MountUnseenItem {
+  id: number;
+  path_key: string;
+  size: number;
+  last_seen_at: number | null;
+  last_seen_job_pk: number | null;
+}
+
+export interface MountUnseen {
+  mount_id: string;
+  state: string;
+  job: {
+    id: number;
+    mode: string;
+    finished_at: number | null;
+    seen: number;
+    rules_hash: string;
+  } | null;
+  rules_changed: boolean;
+  total_active: number;
+  unseen_count: number;
+  items: MountUnseenItem[];
+  limit: number;
+  offset: number;
+  truncated: boolean;
+}
+
+export interface MountRebaselineResponse {
+  ok: true;
+  mount_id: string;
+  updated: number;
+  state: 'active';
+  manifest_epoch: number;
+  job_id: number;
+}
+
+/** 查询最近一轮巡检中未出现的已知文件；接口未就绪时调用方按 null 降级。 */
+export function fetchMountUnseen(
+  mountPk: number,
+  limit = 200,
+  signal?: AbortSignal,
+): Promise<MountUnseen> {
+  return api<MountUnseen>(`/api/v1/mounts/${mountPk}/unseen?limit=${limit}`, { signal });
+}
+
+/** 整批确认这些文件已删除并重建基线（只改清单状态，不删除磁盘文件）。 */
+export function rebaselineMount(
+  mountPk: number,
+  expectedJobId: number,
+): Promise<MountRebaselineResponse> {
+  return api<MountRebaselineResponse>(`/api/v1/mounts/${mountPk}/rebaseline`, {
+    method: 'POST',
+    body: JSON.stringify({ expected_job_id: expectedJobId }),
+  });
+}
+
 export interface IssueDetail {
   id: number;
   type: string;

@@ -71,6 +71,7 @@ describe('audit labels', () => {
   it('translates known actions and keeps unknown ones', () => {
     expect(auditActionLabel('job.create')).toBe('创建巡检任务');
     expect(auditActionLabel('repair.complete')).toBe('修复完成');
+    expect(auditActionLabel('mount.rebaseline')).toBe('确认删除并重建基线');
     expect(auditActionLabel('issue.rebaseline')).toBe('确认更新基线');
     expect(auditActionLabel('issue.ignore')).toBe('忽略异常');
     expect(auditActionLabel('unknown.action')).toBe('unknown.action');

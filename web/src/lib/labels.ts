@@ -140,6 +140,7 @@ const auditActions: Record<string, string> = {
   'job.expire': '任务租约过期',
   'mount.guard': '挂载守卫判定',
   'mount.suspect': '标记疑似掉盘',
+  'mount.rebaseline': '确认删除并重建基线',
   'mount.sync': '同步挂载点',
   'mount.delete': '删除挂载点',
   'machine.delete': '删除机器',

@@ -74,6 +74,17 @@ export const FinishSchema = z.object({
 
 export const OffsetQuery = z.coerce.number().int().min(0).default(0);
 
+/** 挂载点「最近一轮未出现文件」查询参数。 */
+export const MountUnseenQuery = z.object({
+  limit: z.coerce.number().int().min(1).max(1000).default(200),
+  offset: z.coerce.number().int().min(0).default(0),
+});
+
+/** 挂载点重建基线请求：expected_job_id 用于乐观并发校验（可选）。 */
+export const MountRebaselineSchema = z.object({
+  expected_job_id: z.number().int().positive().optional(),
+});
+
 export const RepairRequestSchema = z.object({
   source_path_id: z.number().int().positive(),
 });

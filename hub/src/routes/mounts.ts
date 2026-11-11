@@ -2,8 +2,9 @@ import type { FastifyInstance } from 'fastify';
 import type { RouteContext } from './index.js';
 import { HttpError } from '../http/errors.js';
 import { requireSession } from '../http/auth.js';
-import { IdParam, ScanRequest } from '../http/schemas.js';
+import { IdParam, MountRebaselineSchema, MountUnseenQuery, ScanRequest } from '../http/schemas.js';
 import { computeCoverage, createScanJob, getMount, type MountRow } from '../services/jobs.js';
+import { listMountUnseen, rebaselineMount } from '../services/mount-reconcile.js';
 import { parseSchedule } from '../services/scheduler.js';
 import { deleteMount } from '../services/deletion.js';
 import { transfersPath } from '../services/repairs.js';
@@ -77,5 +78,21 @@ export function registerMountRoutes(app: FastifyInstance, ctx: RouteContext): vo
     const body = ScanRequest.parse(request.body ?? {});
     const { jobId } = createScanJob(ctx.db, mountPk, body.mode, 'user');
     return reply.code(202).send({ job_id: jobId, mode: body.mode });
+  });
+
+  // 疑似掉盘时最近一轮未出现、仍为 active 的路径（只读，供 Web 展示与人工确认）。
+  app.get('/api/v1/mounts/:id/unseen', async (request) => {
+    requireSession(ctx.db, request);
+    const mountPk = IdParam.parse((request.params as { id: string }).id);
+    const query = MountUnseenQuery.parse(request.query ?? {});
+    return listMountUnseen(ctx.db, mountPk, query);
+  });
+
+  // 人工确认这批判定「已删除」：置 out_of_scope、重建基线并解开 suspect 自锁。
+  app.post('/api/v1/mounts/:id/rebaseline', async (request) => {
+    requireSession(ctx.db, request);
+    const mountPk = IdParam.parse((request.params as { id: string }).id);
+    const body = MountRebaselineSchema.parse(request.body ?? {});
+    return rebaselineMount(ctx.db, mountPk, body.expected_job_id);
   });
 }

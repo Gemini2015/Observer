@@ -212,6 +212,7 @@ export interface ScanOnceOptions {
   cookie: string;
   mode?: 'baseline' | 'incremental' | 'full';
   entries: unknown[];
+  stats?: Record<string, unknown>;
   guard?: { status: 'ok' | 'unavailable' | 'suspect'; reason?: string };
 }
 
@@ -243,7 +244,7 @@ export async function scanOnce(ctx: TestContext, options: ScanOnceOptions) {
     method: 'POST',
     url: `/api/v1/jobs/${jobId}/finish`,
     headers: { authorization: `Bearer ${options.agentToken}` },
-    payload: { status: 'completed', stats: {}, guard: options.guard },
+    payload: { status: 'completed', stats: options.stats ?? {}, guard: options.guard },
   });
 
   return { jobId, start, results, finish };

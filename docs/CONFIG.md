@@ -104,6 +104,7 @@ mounts:                       # 必填：至少一个
 - 条件：mount `active`、**已建基线**（至少一条路径）、在 `window` 内、无活跃任务、距上次任务 ≥ `interval_minutes`、当日预算未耗尽。
 - `window` 支持跨午夜（如 `23:00-06:00`）；预算按 hub 本地自然日累计（`stats.duration_ms`）。
 - 跳过 `unavailable` / `suspect` / `removed`、机器离线、已有 pending/running 任务。
+- 疑似掉盘（`suspect`）不会自动继续排期；在挂载点详情页确认「最近一轮未出现的文件」后执行「确认删除并重建基线」，这批路径转 `out_of_scope`、mount 恢复 `active`、清单版本自增（agent 重新同步），审计记录 `mount.rebaseline`。
 - 手动触发（Web / CLI）**不受窗口与预算限制**。
 - 心跳超过 `OBSERVER_OFFLINE_AFTER_SECONDS` 未达 → 机器标记 `offline`。
 

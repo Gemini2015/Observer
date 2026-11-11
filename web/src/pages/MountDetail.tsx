@@ -1,6 +1,16 @@
 import { useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { ApiError, api, type Job, type MountDetail, type ScanMode } from '../api';
+import {
+  ApiError,
+  api,
+  fetchMountUnseen,
+  rebaselineMount,
+  type Job,
+  type MountDetail,
+  type MountUnseen,
+  type ScanMode,
+} from '../api';
+import { useConfirm } from '../components/ConfirmDialog';
 import { EmptyState } from '../components/EmptyState';
 import { JsonDetails, KeyValue } from '../components/KeyValue';
 import { PageHeader } from '../components/PageHeader';
@@ -10,6 +20,7 @@ import { StatusBadge } from '../components/StatusBadge';
 import { useToast } from '../components/Toast';
 import { copyText } from '../lib/clipboard';
 import {
+  formatBytes,
   formatCount,
   formatDuration,
   formatPercent,
@@ -23,6 +34,8 @@ import { jobMode, jobStatus, mountState, statLabel } from '../lib/labels';
 interface MountBundle {
   mount: MountDetail;
   jobs: Job[];
+  /** 最近一轮未出现的已知文件；接口未就绪或请求失败时为 null。 */
+  unseen: MountUnseen | null;
 }
 
 function jobDuration(job: Job): string {
@@ -33,7 +46,9 @@ function jobDuration(job: Job): string {
 export default function MountDetailPage() {
   const { id } = useParams<{ id: string }>();
   const toast = useToast();
+  const confirm = useConfirm();
   const [busy, setBusy] = useState<ScanMode | null>(null);
+  const [rebaselineBusy, setRebaselineBusy] = useState(false);
 
   const { data, error, reload } = usePolling<MountBundle>(
     async (signal) => {
@@ -48,7 +63,14 @@ export default function MountDetailPage() {
       } catch (err) {
         if (!(err instanceof ApiError) || err.status !== 404) throw err;
       }
-      return { mount, jobs };
+      // 附加数据：接口未就绪或请求失败时降级为不展示，不影响整页其他内容。
+      let unseen: MountUnseen | null = null;
+      try {
+        unseen = await fetchMountUnseen(mount.id, 200, signal);
+      } catch (err) {
+        if ((err as { name?: string } | null)?.name === 'AbortError') throw err;
+      }
+      return { mount, jobs, unseen };
     },
     { intervalMs: 5_000, deps: [id] },
   );
@@ -102,10 +124,50 @@ export default function MountDetailPage() {
   }
   if (!data) return <PageLoading />;
 
-  const { mount, jobs } = data;
+  const { mount, jobs, unseen } = data;
   const lastJob = mount.last_job;
   const stats = lastJob?.stats ? Object.entries(lastJob.stats) : [];
   const hasCoverage = mount.coverage.total > 0;
+  const visibleUnseenItems = unseen?.items.slice(0, 50) ?? [];
+  const hiddenUnseenCount = unseen
+    ? Math.max(0, unseen.unseen_count - visibleUnseenItems.length)
+    : 0;
+
+  const performRebaseline = async (target: MountUnseen) => {
+    const job = target.job;
+    if (!job) return;
+    const count = formatCount(target.unseen_count);
+    const ok = await confirm({
+      title: `确认这 ${count} 个文件已删除并重建基线？`,
+      description: (
+        <>
+          <div>
+            确认后这 {count} 个文件将标记为「已移出规则」并从此基线移除；系统会重建基线、把挂载点恢复为
+            active（正常），并通知 agent 重新拉取清单。
+          </div>
+          <div className="muted" style={{ marginTop: 8 }}>
+            不会删除磁盘上的任何文件。
+          </div>
+        </>
+      ),
+      confirmText: '确认删除',
+      tone: 'danger',
+    });
+    if (!ok) return;
+    setRebaselineBusy(true);
+    try {
+      const result = await rebaselineMount(mount.id, job.id);
+      toast.success(
+        '已确认删除',
+        `已处理 ${formatCount(result.updated)} 个文件，挂载点已恢复为正常`,
+      );
+      reload();
+    } catch (err) {
+      toast.error('重建基线失败', (err as Error).message);
+    } finally {
+      setRebaselineBusy(false);
+    }
+  };
 
   return (
     <>
@@ -188,6 +250,87 @@ export default function MountDetailPage() {
           </span>
         </div>
       </div>
+
+      {unseen && unseen.job && unseen.unseen_count > 0 ? (
+        <div className="panel" style={{ marginTop: 16 }}>
+          <div className="section-title">
+            <h3>最近一轮未出现的文件</h3>
+            <span className="muted">
+              {formatCount(unseen.unseen_count)} / {formatCount(unseen.total_active)} 个已知文件
+            </span>
+          </div>
+          <div className="muted" style={{ marginBottom: 10, fontSize: 'var(--text-xs)' }}>
+            任务 #{unseen.job.id}（{jobMode[unseen.job.mode]?.label ?? unseen.job.mode}、
+            {unseen.job.finished_at ? formatRelative(unseen.job.finished_at) : '进行中'}）共发现{' '}
+            {formatCount(unseen.job.seen)} 个文件；{formatCount(unseen.unseen_count)}{' '}
+            个已知文件在本轮未出现。系统按「疑似掉盘」熔断，不会逐文件报异常。
+          </div>
+          {visibleUnseenItems.length > 0 ? (
+            <div className="table-wrap">
+              <table className="table table-compact">
+                <thead>
+                  <tr>
+                    <th scope="col">路径</th>
+                    <th scope="col" className="num">
+                      大小
+                    </th>
+                    <th scope="col">最后发现</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {visibleUnseenItems.map((item) => (
+                    <tr key={item.id}>
+                      <td className="mono">{item.path_key}</td>
+                      <td className="num">{formatBytes(item.size)}</td>
+                      <td title={item.last_seen_at ? formatTime(item.last_seen_at) : undefined}>
+                        {item.last_seen_at ? formatRelative(item.last_seen_at) : '—'}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <div className="muted">没有可展示的未出现文件明细。</div>
+          )}
+          {hiddenUnseenCount > 0 ? (
+            <div className="muted" style={{ marginTop: 8, fontSize: 'var(--text-xs)' }}>
+              还有 {formatCount(hiddenUnseenCount)} 条未显示。
+            </div>
+          ) : null}
+          {unseen.truncated ? (
+            <div className="muted" style={{ marginTop: 4, fontSize: 'var(--text-xs)' }}>
+              接口最多返回 {formatCount(unseen.limit)} 条，共 {formatCount(unseen.unseen_count)}{' '}
+              条未出现文件。
+            </div>
+          ) : null}
+          {unseen.rules_changed ? (
+            <div className="alert alert-warn" style={{ marginTop: 10 }}>
+              巡检规则已变化，最近一轮结果不能用于判定消失；请先手动巡检后再确认。
+            </div>
+          ) : unseen.job.seen === 0 ? (
+            <div className="alert alert-warn" style={{ marginTop: 10 }}>
+              最近一轮没有读到任何文件（挂载可能不可用），请先确认磁盘已挂载。
+            </div>
+          ) : (
+            <div className="toolbar" style={{ marginTop: 10 }}>
+              <button
+                className="btn btn-danger"
+                type="button"
+                disabled={rebaselineBusy}
+                onClick={() => void performRebaseline(unseen)}
+              >
+                {rebaselineBusy ? '处理中…' : '确认已删除并重建基线'}
+              </button>
+              <span className="muted" style={{ fontSize: 'var(--text-xs)' }}>
+                确认后这 {formatCount(unseen.unseen_count)}{' '}
+                个文件将标记为“已移出规则”并从此基线移除，挂载点恢复为正常并通知 agent
+                重新拉取清单；不会删除磁盘上的任何文件。
+              </span>
+            </div>
+          )}
+        </div>
+      ) : null}
 
       <div className="split" style={{ marginTop: 16 }}>
         <div className="panel">
