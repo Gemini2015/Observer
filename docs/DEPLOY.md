@@ -141,3 +141,4 @@ spctl -a -vv "bin/Observer Agent.app"
 | Wails NSIS 打包 | ❌ 未验证（未安装 NSIS） |
 | macOS 构建 / 签名 / 公证 | ❌ 未验证（需 Mac + Apple 证书） |
 | 性能基准 | ✅ 见 [PLAN-M4](PLAN-M4.md) §4 |
+| GitHub Actions Release（tag → 三平台产物 + SHA256SUMS） | ✅ 2026-11-11 试发布 `v0.0.0-rc.1` 通过：Actions run 成功、Release 为 pre-release、下载资产 sha256 一致、linux/amd64 静态链接且 `version` 输出正确；流程见 [RELEASE](RELEASE.md) |
