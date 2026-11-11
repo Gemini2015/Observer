@@ -51,7 +51,7 @@ export function validEnrollPayload(machineId = 'test-machine', mountId = 'drill'
     hostname: 'TEST-PC',
     platform: 'windows',
     arch: 'amd64',
-    agent_version: '0.1.0',
+    agent_version: '1.0.0',
     mounts: [
       {
         mount_id: mountId,

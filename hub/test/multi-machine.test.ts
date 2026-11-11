@@ -100,7 +100,7 @@ describe('multi-machine', () => {
       'machine-alpha',
       'machine-beta',
     ]);
-    expect(machineList.every((machine) => machine.agent_version === '0.1.0')).toBe(true);
+    expect(machineList.every((machine) => machine.agent_version === '1.0.0')).toBe(true);
     expect(machineList.every((machine) => machine.mounts[0]?.mount_id === 'drill')).toBe(true);
 
     const jobAlpha = await triggerScan(context, cookie, alpha.mountId);

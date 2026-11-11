@@ -5,18 +5,18 @@
 ## 1. 触发方式
 
 - **tag 由开发者手动创建并推送**；workflow 只在 tag push 时运行，不创建、不移动、不删除任何 tag。
-- tag 命名：`vMAJOR.MINOR.PATCH[-prerelease]`，例如 `v0.1.0`、`v0.2.0-rc.1`；带 `-` 的 tag 会自动标记为 pre-release。
+- tag 命名：`vMAJOR.MINOR.PATCH[-prerelease]`，例如 `v1.0.0`、`v1.1.0-rc.1`；带 `-` 的 tag 会自动标记为 pre-release。
 - 必须把 workflow 文件合入 `main` 后，再从包含它的提交打 tag（tag 若指向没有 workflow 的提交不会触发）。
 - 里程碑 tag（`m1`–`m4`）不匹配 `v*.*.*`，不会触发。
 
 ```bash
-# 正式发布
-git tag -a v0.1.0 -m "observer-agent v0.1.0"
-git push origin v0.1.0
+# 正式发布（示例为下一个版本号；当前最新正式版为 v1.0.0）
+git tag -a v1.1.0 -m "observer-agent v1.1.0"
+git push origin v1.1.0
 ```
 
 发布版本 = tag 去掉 `v` 前缀，通过 `-ldflags "-X observer/agent/internal/version.Version=<ver>"` 写入二进制，
-因此 `observer-agent version` 输出发布版本（仓库默认值 `0.1.0-dev` 只用于本地开发构建）。
+因此 `observer-agent version` 输出发布版本（仓库默认值 `1.0.0`，发布时仍按 tag 覆盖）。
 
 ## 2. workflow 流程
 
@@ -45,9 +45,9 @@ git push origin v0.1.0
 
 ```bash
 sha256sum -c SHA256SUMS
-tar -tzf observer-agent_0.1.0_linux_amd64.tar.gz        # 查看内容
-tar -xzf observer-agent_0.1.0_linux_amd64.tar.gz
-./observer-agent version                                 # 输出 0.1.0
+tar -tzf observer-agent_1.0.0_linux_amd64.tar.gz        # 查看内容
+tar -xzf observer-agent_1.0.0_linux_amd64.tar.gz
+./observer-agent version                                 # 输出 1.0.0
 ```
 
 Windows：解压 zip 后执行 `observer-agent.exe version`，应输出同一版本号。
@@ -56,12 +56,12 @@ Windows：解压 zip 后执行 `observer-agent.exe version`，应输出同一版
 
 ```bash
 # 方案 A：开发机已装 Go（tar/zip 可用）
-bash scripts/build-release.sh v0.1.0 dist/release
+bash scripts/build-release.sh v1.1.0 dist/release
 
 # 方案 B：没有 Go 时用容器（产物写入仓库 dist/release，gitignore 范围）
 docker run --rm -v "${PWD}:/src" -w /src golang:1.27-bookworm \
   bash -lc 'apt-get update -qq && apt-get install -y -qq zip >/dev/null && \
-            bash scripts/build-release.sh v0.1.0 /src/dist/release'
+            bash scripts/build-release.sh v1.1.0 /src/dist/release'
 ```
 
 脚本会自检：linux/amd64 产物 `version` 输出必须等于传入版本，并生成、校验 `SHA256SUMS`。
@@ -73,7 +73,7 @@ docker run --rm -v "${PWD}:/src" -w /src golang:1.27-bookworm \
 - **重跑**：Actions → 选中 run →「Re-run all jobs」。同名 tag 重跑会更新同一个 Release，资产同名覆盖。
 - **删除发布**：先删除 GitHub Release（页面），再删除远端 tag：
   ```bash
-  git push origin :refs/tags/v0.1.0
+  git push origin :refs/tags/v1.1.0
   ```
 - 已经分发的版本号不要复用；修正问题请发新的 patch 版本。
 

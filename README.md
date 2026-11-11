@@ -8,7 +8,7 @@
 
 Observer 由**中心服（hub）**和部署在各台机器上的 **agent** 组成。agent 定期校验本地文件哈希，与 hub 保存的基线比对；发现内容不一致、文件缺失或不可读时生成异常，并可从另一台机器的健康副本跨机恢复。
 
-**状态：M1–M4 已完成（tag `m1`–`m4`）；后续规划见 [docs/ROADMAP.md](docs/ROADMAP.md)。**
+**状态：v1.0.0（agent 已发布，见 [发布流程](docs/RELEASE.md)）；M1–M4 已完成（tag `m1`–`m4`）；后续规划见 [docs/ROADMAP.md](docs/ROADMAP.md)。**
 
 ## 能力
 

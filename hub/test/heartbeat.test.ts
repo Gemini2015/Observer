@@ -18,7 +18,7 @@ describe('POST /api/v1/agent/heartbeat', () => {
       method: 'POST',
       url: '/api/v1/agent/heartbeat',
       headers: { authorization: `Bearer ${token}` },
-      payload: { agent_version: '0.1.0' },
+      payload: { agent_version: '1.0.0' },
     });
 
     expect(heartbeat.statusCode).toBe(200);
@@ -66,7 +66,7 @@ describe('POST /api/v1/agent/heartbeat', () => {
       method: 'POST',
       url: '/api/v1/agent/heartbeat',
       headers: { authorization: `Bearer ${token}` },
-      payload: { agent_version: '0.2.0' },
+      payload: { agent_version: '1.0.0' },
     });
 
     const agent = ctx.db.prepare('SELECT last_seen_at, version FROM agents').get() as {
@@ -77,7 +77,7 @@ describe('POST /api/v1/agent/heartbeat', () => {
       last_seen_at: number;
     };
     expect(agent.last_seen_at).toBeGreaterThan(0);
-    expect(agent.version).toBe('0.2.0');
+    expect(agent.version).toBe('1.0.0');
     expect(machine.last_seen_at).toBeGreaterThan(0);
   });
 });

@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Observer Hub API
-  version: 0.2.0
+  version: 1.0.0
   description: |
     中心服对外接口。M1 包含：健康检查、agent 注册/心跳/结果上报、路径清单、Web 登录与挂载点控制。
     错误统一返回 application/problem+json。

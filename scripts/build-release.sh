@@ -4,7 +4,7 @@
 # 用法:
 #   scripts/build-release.sh <version> [outdir]
 #
-#   version  发布版本（v0.1.0 或 0.1.0，v 前缀会被去掉），写入二进制 version
+#   version  发布版本（v1.0.0 或 1.0.0，v 前缀会被去掉），写入二进制 version
 #   outdir   输出目录，默认 dist/release（相对仓库根目录）
 #
 # 环境要求: go、tar、zip（zip 仅 windows 产物需要）
@@ -21,7 +21,7 @@ fi
 raw_version="$1"
 version="${raw_version#v}"
 if [[ ! "$version" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?$ ]]; then
-  echo "error: invalid version '$raw_version' (want v0.1.0 or 0.1.0)" >&2
+  echo "error: invalid version '$raw_version' (want v1.0.0 or 1.0.0)" >&2
   exit 2
 fi
 

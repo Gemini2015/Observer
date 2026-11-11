@@ -134,6 +134,6 @@ cd agent; go test ./...
 
 - 不提供明暗切换与 macOS 开机启动（保持现有平台行为）。
 - 不新增 hub 异常列表 API；不在桌面端创建扫描任务（由 hub 触发）。
-- 版本显示来自 `version.Version`（当前 `0.1.0-dev`），尚未与 `build/config.yml` 的 0.2.0 对齐；打包流程后续统一注入。
+- 版本显示来自 `version.Version`（当前 `1.0.0`），与 `build/config.yml` 的 1.0.0 一致；发布构建由 tag 注入版本。
 - 托盘通知（ROADMAP 第 6 项）仍未做。
 - 本次未修改 `docs/QUICKSTART.md` / `docs/TESTING.md` / `docs/DESIGN-TECH.md`：这些文件在评审时含有并行未提交修改，避免混入；待其提交后再补桌面端章节。
