@@ -64,3 +64,4 @@ docs/        需求、设计、计划、部署与测试文档
 | 计划 | [M1](docs/PLAN-M1.md) / [M2](docs/PLAN-M2.md) / [M3](docs/PLAN-M3.md) / [M4](docs/PLAN-M4.md) | 各里程碑范围、设计与验收记录 |
 | 测试 | [测试与验收](docs/TESTING.md) | 单测、drill M1–M4、性能基准、回归矩阵 |
 | 部署 | [部署与打包](docs/DEPLOY.md) | NAS systemd/Docker、Windows、macOS 签名公证 |
+| 发布 | [发布流程](docs/RELEASE.md) | 手动 tag 触发 GitHub Actions 构建 agent 并发布 Release |

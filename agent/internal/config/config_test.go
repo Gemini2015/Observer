@@ -125,7 +125,7 @@ func TestValidationErrors(t *testing.T) {
 		},
 		{
 			name: "overlapping paths",
-			yaml: fmt.Sprintf("agent:\n  machine_id: test-agent\n  hub: http://x\nmounts:\n  - id: a\n    path: %q\n  - id: b\n    path: %q\n", dir, dir+"\\nested"),
+			yaml: fmt.Sprintf("agent:\n  machine_id: test-agent\n  hub: http://x\nmounts:\n  - id: a\n    path: %q\n  - id: b\n    path: %q\n", dir, filepath.Join(dir, "nested")),
 			want: "overlaps",
 		},
 		{
