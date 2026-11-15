@@ -143,6 +143,7 @@ spctl -a -vv "bin/Observer Agent.app"
 | Dockerfile.hub / compose（hub） | ✅ 2026-11-05 在 WSL2 Ubuntu + Docker 29 实测：镜像 build、healthcheck、卷保留升级、数据与在线 agent 均正常；2026-11-15 Apple container 1.7.1 arm64 build + `/healthz` 通过，amd64（Rosetta）build + `/healthz` 通过 |
 | Dockerfile.agent / compose（agent） | ⚠️ 2026-11-15 在 Apple container 1.7.1 本地 arm64 build + hub/agent 端到端（注册/心跳/全量扫描/sentinel/状态卷）通过；compose 与群晖真机待验 |
 | Docker 镜像 CI（hub/agent × amd64/arm64 → Release tar） | ✅ 2026-11-15 run `43698923356`：4 个镜像 build/smoke/`docker save`/`docker load` 通过，资产已上传 Release |
+| hub 容器数据目录诊断与属主自动修正（v1.1.1） | ✅ 2026-11-15 Apple container 验证：只读 `/data` 输出明确诊断；root + `OBSERVER_FIX_DATA_PERMISSIONS=1` 修正属主后降权运行，`/healthz` 正常 |
 | 群晖 Container Manager（镜像导入/项目/路径映射） | ❌ 未在真实 DSM 验证；模板与文档静态校验通过 |
 | systemd unit | ✅ 静态检查（本机无 systemd 环境，未实际启动） |
 | Windows agent / 桌面 exe | ✅ 构建、启动、单实例 |

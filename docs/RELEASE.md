@@ -159,3 +159,7 @@ docker load -i "observer-hub_${VERSION}_linux_amd64.tar"   # 回归确认是 Doc
   - GitHub Release 标题 `Observer v1.1.0`，非 pre-release；包含 3 个二进制归档 + `SHA256SUMS`，以及 4 个镜像 tar + 各自 `.sha256` + `SHA256SUMS-docker`。
   - 下载 agent amd64 tar 校验通过：`manifest.json` 的 RepoTags 为 `observer-agent:1.1.0`，配置架构 amd64，labels version `1.1.0`。
   - hub 镜像 tar 大小 360/377 MB（amd64/arm64），均低于 GitHub 2 GiB 限制；CI 已用 `docker load` 回归 Docker archive。
+- 2026-11-15：发布 `v1.1.1`（tag `d316f86`），修复群晖 hub 容器数据目录不可写时只抛 `SQLITE_CANTOPEN` 的问题。
+  - Actions run `43704101911` 全部 job 成功；资产与 v1.1.0 结构相同（3 个二进制归档 + `SHA256SUMS`、4 个镜像 tar + 各自 `.sha256` + `SHA256SUMS-docker`）。
+  - 下载 `observer-hub_1.1.1_linux_amd64.tar` 校验通过：config `User=node`、`Entrypoint=/usr/local/bin/docker-entrypoint.sh`、labels version `1.1.1`；顶层 layer 为新增入口脚本，`hub/dist/db/index.js` 含数据目录诊断。
+  - 本地（Apple container）验证：只读挂载 `/data` 时报 `data directory is not writable: /data (running as uid=1000, gid=1000)` 并给出修复提示；`user: "0:0"` + `OBSERVER_FIX_DATA_PERMISSIONS=1` 时先 chown 再降权，`/healthz` 正常、进程 uid 为 1000。
