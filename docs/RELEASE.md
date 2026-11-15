@@ -191,4 +191,8 @@ docker load -i "observer-hub_${VERSION}_linux_amd64.tar"   # 回归确认是 Doc
   - Actions run `43704101911` 全部 job 成功；资产与 v1.1.0 结构相同（3 个二进制归档 + `SHA256SUMS`、4 个镜像 tar + 各自 `.sha256` + `SHA256SUMS-docker`）。
   - 下载 `observer-hub_1.1.1_linux_amd64.tar` 校验通过：config `User=node`、`Entrypoint=/usr/local/bin/docker-entrypoint.sh`、labels version `1.1.1`；顶层 layer 为新增入口脚本，`hub/dist/db/index.js` 含数据目录诊断。
   - 本地（Apple container）验证：只读挂载 `/data` 时报 `data directory is not writable: /data (running as uid=1000, gid=1000)` 并给出修复提示；`user: "0:0"` + `OBSERVER_FIX_DATA_PERMISSIONS=1` 时先 chown 再降权，`/healthz` 正常、进程 uid 为 1000。
-- 下次发布（首次包含桌面端）时补充：实际 Actions run、`desktop`/`finalize-release` job 结果、桌面端 zip 的 PE 子系统/版本校验结果，以及下载资产 `sha256sum -c SHA256SUMS` 的结果。
+- 2026-11-15：发布 `v1.2.0`（最终 tag `26ccda5`），首次包含 Windows 桌面端。
+  - Actions run `43714299026` 全部 job 成功；前两次 run（`43713254279`、`43713966772`）的 finalize 因 job 未 checkout、`gh` 无法推断仓库而失败，补 `actions/checkout` + `GH_REPO` 后重跑通过，版本号未变。
+  - 资产：3 个 CLI 归档 + `observer-agent-desktop_1.2.0_windows_amd64.zip` + `SHA256SUMS`（4 个二进制归档）；4 个镜像 tar + 各自 `.sha256` + `SHA256SUMS-docker`。
+  - 下载 4 个二进制资产 `sha256sum -c SHA256SUMS` 全部通过；桌面 zip 内 exe PE 子系统为 2（GUI）、版本字符串 `1.2.0`；CLI Windows exe 为 3（控制台），zip 含 `README-WINDOWS.txt`；linux/amd64 为静态 ELF 且 `version` 为 `1.2.0`。
+  - Release 正文包含「下载哪个包」指引；桌面 zip 与 CLI zip 的区别已在 README/QUICKSTART/DEPLOY 说明。
