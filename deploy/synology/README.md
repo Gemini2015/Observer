@@ -43,4 +43,4 @@
 - 默认只读、非 root、无入站端口；agent 不需要端口映射。
 - NAS 上不建议开启 `repair_allowed`，避免写共享文件夹。
 - ARMv7 机型不支持（Container Manager 可用性和性能都不保证）。
-- 当前镜像 tag 为 `1.1.1`；下载其他版本时同步替换 compose 中的 tag。
+- 当前镜像 tag 为 `1.2.0`；下载其他版本时同步替换 compose 中的 tag。

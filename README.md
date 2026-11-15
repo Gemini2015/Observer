@@ -8,7 +8,9 @@
 
 Observer 由**中心服（hub）**和部署在各台机器上的 **agent** 组成。agent 定期校验本地文件哈希，与 hub 保存的基线比对；发现内容不一致、文件缺失或不可读时生成异常，并可从另一台机器的健康副本跨机恢复。
 
-**状态：v1.1.1（agent 已发布，见 [发布流程](docs/RELEASE.md)）；M1–M4 已完成（tag `m1`–`m4`）；后续规划见 [docs/ROADMAP.md](docs/ROADMAP.md)。**
+**状态：v1.2.0（agent 与 Windows 桌面端已发布，见 [发布流程](docs/RELEASE.md)）；M1–M4 已完成（tag `m1`–`m4`）；后续规划见 [docs/ROADMAP.md](docs/ROADMAP.md)。**
+
+> **Windows 下载（v1.2.0 起）**：桌面 GUI 用 `observer-agent-desktop_<版本>_windows_amd64.zip`，解压后双击运行（需要 WebView2）；`observer-agent_<版本>_windows_amd64.zip` 是命令行版，需要在 PowerShell 中运行，不能双击。
 
 ## 能力
 

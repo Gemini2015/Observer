@@ -94,8 +94,17 @@ docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.local.yml \
 
 ## 4. Windows
 
+**从 GitHub Release 安装（推荐，v1.2.0 起）**
+
+- 桌面 GUI：下载 `observer-agent-desktop_<ver>_windows_amd64.zip`，解压到有写权限的目录（例如 `D:\Observer`，不要放 `C:\Program Files`），双击 `observer-agent-desktop.exe`。需要 Microsoft Edge WebView2 Runtime（Win11 / Win10 1803+ 通常已内置）；缺失时会弹框提示安装并给出日志路径，不会静默闪退。程序未做代码签名，SmartScreen 提示时选择「更多信息」→「仍要运行」，并用 Release 的 `SHA256SUMS` 核对文件。
+- 命令行 agent：下载 `observer-agent_<ver>_windows_amd64.zip`，在 PowerShell 中按包内 `README-WINDOWS.txt` 运行；**不要双击**（双击只会打印用法后退出）。
+
+**本地构建**
+
 - agent：`go build -o bin/observer-agent.exe ./cmd/observer-agent`（已验证）。
 - 桌面端：`cd agent/desktop && wails3 build` → `bin/observer-agent-desktop.exe`（已验证启动/单实例/托盘）。
+- 发布用桌面 zip：Windows 上执行 `pwsh scripts/build-desktop-release.ps1 -Version 1.2.0`；脚本会构建前端/bindings/syso、以 `-H windowsgui` 构建 exe，并校验 PE 子系统、版本字符串与 zip 内容（见 [RELEASE §5](RELEASE.md#5-本地预演不推-tag)）。
+- 桌面端日志：`%LocalAppData%\Observer\observer-agent-desktop.log`（启动失败时错误框会显示该路径）。
 - NSIS 安装包：安装 NSIS 后执行 `wails3 package`（本机未安装 NSIS，未验证）；安装包需提示 WebView2 Runtime（Win10 1803+ 通常已内置）。
 - 代码签名（可选）：`signtool sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /a observer-agent-desktop.exe`。
 
@@ -147,6 +156,8 @@ spctl -a -vv "bin/Observer Agent.app"
 | 群晖 Container Manager（镜像导入/项目/路径映射） | ❌ 未在真实 DSM 验证；模板与文档静态校验通过 |
 | systemd unit | ✅ 静态检查（本机无 systemd 环境，未实际启动） |
 | Windows agent / 桌面 exe | ✅ 构建、启动、单实例 |
+| Windows 桌面端启动诊断（文件日志 / 错误框 / WebView2 提示） | ⏳ 代码已加；待 windows-latest 构建与无 WebView2 环境验证 |
+| GitHub Actions Release（桌面端 zip + 合并 SHA256SUMS） | ⏳ 下次 tag 首发验证；desktop/finalize job 已在 workflow 中 |
 | Wails NSIS 打包 | ❌ 未验证（未安装 NSIS） |
 | macOS 构建 / 签名 / 公证 | ❌ 未验证（需 Mac + Apple 证书） |
 | 性能基准 | ✅ 见 [PLAN-M4](PLAN-M4.md) §4 |

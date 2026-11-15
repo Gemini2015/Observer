@@ -1,8 +1,11 @@
-name: Release agent and images
+name: Release agent, desktop and images
 
 # 开发者手动打 tag 并推送后触发（workflow 不创建/移动/删除任何 tag）：
-#   git tag -a v1.2.0 -m "Observer v1.2.0"
-#   git push origin v1.2.0
+#   git tag -a v1.3.0 -m "Observer v1.3.0"
+#   git push origin v1.3.0
+#
+# 产物：命令行 agent（linux amd64/arm64、windows amd64）、Windows 桌面端 zip、
+#       hub/agent Docker 镜像，以及合并后的 SHA256SUMS。
 on:
   push:
     tags:
@@ -69,6 +72,156 @@ jobs:
             dist/release/*.tar.gz
             dist/release/*.zip
             dist/release/SHA256SUMS
+
+  # 构建 Windows 桌面端（Wails v3）。与 docker job 并行；版本号来自 release job。
+  # 与 CLI 分开成 job：桌面端需要 Windows runner、Go 1.26、Node 和 wails3。
+  desktop:
+    name: Build Windows desktop
+    needs: release
+    runs-on: windows-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: agent/desktop/go.mod
+          cache-dependency-path: agent/desktop/go.sum
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: agent/desktop/frontend/package-lock.json
+
+      - name: Install wails3
+        shell: pwsh
+        run: |
+          go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0
+          $wailsBin = Join-Path (go env GOPATH) "bin"
+          Add-Content -Path $env:GITHUB_PATH -Value $wailsBin
+          $env:PATH = "$wailsBin;$env:PATH"
+          if (-not (Get-Command wails3 -ErrorAction SilentlyContinue)) {
+            throw "wails3 not found after go install"
+          }
+
+      - name: Build desktop release
+        shell: pwsh
+        env:
+          VERSION: ${{ needs.release.outputs.version }}
+        run: |
+          pwsh -NoProfile -ExecutionPolicy Bypass -File ./scripts/build-desktop-release.ps1 -Version $env:VERSION -OutDir dist/desktop
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Test desktop
+        shell: pwsh
+        working-directory: agent/desktop
+        run: |
+          go test .
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          go vet .
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Test frontend
+        shell: pwsh
+        working-directory: agent/desktop/frontend
+        run: |
+          npm test
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Upload desktop asset
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.release.outputs.version }}
+        run: |
+          set -euo pipefail
+          gh release upload "$GITHUB_REF_NAME" \
+            "dist/desktop/observer-agent-desktop_${VERSION}_windows_amd64.zip" \
+            --clobber
+
+      - name: Upload checksum fragment
+        uses: actions/upload-artifact@v4
+        with:
+          name: sha-desktop
+          path: dist/desktop/*.sha256
+          retention-days: 3
+          if-no-files-found: error
+
+  # 合并 CLI + 桌面端校验和，并在二进制资产都上传成功后再给 Release 正文加下载指引。
+  # 放在 finalize job 里，避免桌面端构建失败时 Release 正文宣传不存在的资产。
+  finalize-release:
+    name: Finalize release assets
+    needs: [release, desktop]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+
+    steps:
+      - name: Download desktop checksum
+        uses: actions/download-artifact@v4
+        with:
+          name: sha-desktop
+          path: sums
+
+      - name: Merge binary checksums
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          version="${{ needs.release.outputs.version }}"
+          rm -f SHA256SUMS SHA256SUMS.merged
+          gh release download "$GITHUB_REF_NAME" --pattern 'SHA256SUMS' --output SHA256SUMS
+          sed -i 's/\r$//' SHA256SUMS sums/*.sha256
+          # 去掉旧的桌面端行（只重跑 desktop/finalize 时可能存在），换成本次构建的校验和。
+          desktop="observer-agent-desktop_${version}_windows_amd64.zip"
+          grep -vF "  ${desktop}" SHA256SUMS >SHA256SUMS.merged || true
+          cat sums/*.sha256 >>SHA256SUMS.merged
+          sort -k2 -u SHA256SUMS.merged -o SHA256SUMS
+          rm -f SHA256SUMS.merged
+          cat SHA256SUMS
+          for file in \
+            "observer-agent_${version}_linux_amd64.tar.gz" \
+            "observer-agent_${version}_linux_arm64.tar.gz" \
+            "observer-agent_${version}_windows_amd64.zip" \
+            "observer-agent-desktop_${version}_windows_amd64.zip"; do
+            if ! grep -Fq "  ${file}" SHA256SUMS; then
+              echo "::error::SHA256SUMS missing ${file}"
+              exit 1
+            fi
+          done
+          gh release upload "$GITHUB_REF_NAME" SHA256SUMS --clobber
+
+      - name: Prepend asset guide to release notes
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          version="${{ needs.release.outputs.version }}"
+          rm -f current-notes.md new-notes.md guide.md
+          gh release view "$GITHUB_REF_NAME" --json body --jq .body >current-notes.md
+          if grep -qF '## 下载哪个包' current-notes.md; then
+            echo "asset guide already present; skipping"
+            exit 0
+          fi
+          cat >guide.md <<'EOF'
+          ## 下载哪个包
+
+          | 平台 | 文件 | 说明 |
+          | --- | --- | --- |
+          | **Windows 桌面 GUI** | `observer-agent-desktop_@VERSION@_windows_amd64.zip` | 解压后双击 `observer-agent-desktop.exe`；首次启动进入配置向导；需要 WebView2 Runtime |
+          | Windows 命令行 agent | `observer-agent_@VERSION@_windows_amd64.zip` | **不是桌面程序**；双击会打印用法后立即退出，请在 PowerShell 中运行 |
+          | Linux agent | `observer-agent_@VERSION@_linux_{amd64,arm64}.tar.gz` | 解压后按 systemd/命令行方式部署 |
+          | Docker 镜像 | `observer-*_@VERSION@_linux_*.tar` | `docker load` 后使用，见 docs/DEPLOY-SYNOLOGY.md |
+
+          校验：下载 `SHA256SUMS` 后执行 `sha256sum -c SHA256SUMS`。
+          EOF
+          sed -i "s/@VERSION@/${version}/g" guide.md
+          cat guide.md current-notes.md >new-notes.md
+          gh release edit "$GITHUB_REF_NAME" --notes-file new-notes.md
 
   # 为群晖/离线导入构建单架构 Docker 镜像，并作为 Release 资产上传。
   # 不推 Docker Hub/GHCR：镜像以 docker save 的 Docker archive tar 分发。

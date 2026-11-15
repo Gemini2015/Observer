@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
-# 构建 observer-agent 发布产物：linux/amd64、linux/arm64、windows/amd64 + SHA256SUMS。
+# 构建 observer-agent（命令行）发布产物：linux/amd64、linux/arm64、windows/amd64 + SHA256SUMS。
+#
+# 桌面 GUI 不在这里构建：见 scripts/build-desktop-release.ps1 与 release.yml 的 desktop job。
 #
 # 用法:
 #   scripts/build-release.sh <version> [outdir]
 #
-#   version  发布版本（v1.1.1 或 1.1.1，v 前缀会被去掉），写入二进制 version
+#   version  发布版本（v1.2.0 或 1.2.0，v 前缀会被去掉），写入二进制 version
 #   outdir   输出目录，默认 dist/release（相对仓库根目录）
 #
 # 环境要求: go、tar、zip（zip 仅 windows 产物需要）
@@ -21,7 +23,7 @@ fi
 raw_version="$1"
 version="${raw_version#v}"
 if [[ ! "$version" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?$ ]]; then
-  echo "error: invalid version '$raw_version' (want v1.1.1 or 1.1.1)" >&2
+  echo "error: invalid version '$raw_version' (want v1.2.0 or 1.2.0)" >&2
   exit 2
 fi
 
@@ -41,7 +43,7 @@ for tool in go tar zip; do
   fi
 done
 
-for f in agent/go.mod agent/cmd/observer-agent deploy/agent.example.yaml deploy/observer-agent.service; do
+for f in agent/go.mod agent/cmd/observer-agent deploy/agent.example.yaml deploy/observer-agent.service deploy/agent-windows-CLI-README.txt; do
   if [[ ! -e "$root/$f" ]]; then
     echo "error: missing required path '$f'" >&2
     exit 1
@@ -76,8 +78,9 @@ build_target() {
     archive="$outdir/observer-agent_${version}_${goos}_${goarch}.tar.gz"
     tar -czf "$archive" -C "$pkgdir" observer-agent agent.example.yaml observer-agent.service
   else
+    cp "$root/deploy/agent-windows-CLI-README.txt" "$pkgdir/README-WINDOWS.txt"
     archive="$outdir/observer-agent_${version}_${goos}_${goarch}.zip"
-    ( cd "$pkgdir" && zip -q -9 "$archive" observer-agent.exe agent.example.yaml )
+    ( cd "$pkgdir" && zip -q -9 "$archive" observer-agent.exe agent.example.yaml README-WINDOWS.txt )
   fi
   echo "    -> $(basename "$archive")"
 }

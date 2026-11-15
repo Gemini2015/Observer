@@ -110,6 +110,8 @@ go build -o bin/observer-agent.exe ./cmd/observer-agent
 .\bin\observer-agent.exe run -config observer-agent.yaml
 ```
 
+> GitHub Release 的 `observer-agent_<版本>_windows_amd64.zip` 是**命令行版**：解压后要在 PowerShell 里运行，不能双击（双击会打印用法后立即退出）。需要桌面 GUI/系统托盘请下载 `observer-agent-desktop_<版本>_windows_amd64.zip`，见 §6。
+
 > 首次启动后，长期 agent token 会缓存到 `state_dir/agent.token`（默认 `.observer/<machine_id>/agent.token`），后续启动会先校验缓存；如果 token 已在 hub 重新生成，旧缓存会失效并自动改用配置里的新 token。`agent.machine_id` 必须与 token 所属节点一致。
 
 > 也可以使用 token 文件（NAS/服务常用）：配置 `token_file: /var/lib/observer/token`，首次运行设置 `OBSERVER_ENROLL_TOKEN` 完成注册，之后自动从文件读取。
@@ -127,12 +129,22 @@ go build -o bin/observer-agent.exe ./cmd/observer-agent
 
 ## 6. 桌面客户端（Windows 先行）
 
+**方式 A（推荐，普通用户，v1.2.0 起）**：从 GitHub Release 下载 `observer-agent-desktop_<版本>_windows_amd64.zip`，解压到有写权限的目录（例如 `D:\Observer`，不要放在 `C:\Program Files`），双击 `observer-agent-desktop.exe`。
+
+- 运行需要 Microsoft Edge WebView2 Runtime：Windows 11 / Windows 10 1803+ 通常已内置；缺失时程序会弹框给出下载地址和日志路径，不会静默闪退。
+- 程序未做代码签名，首次运行可能出现 SmartScreen「未知发布者」：选择「更多信息」→「仍要运行」，并用 Release 的 `SHA256SUMS` 核对文件。
+- 日志：`%LocalAppData%\Observer\observer-agent-desktop.log`。
+
+**方式 B（本地开发构建）**：
+
 ```powershell
 go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0
 cd agent/desktop
 wails3 build
 .\bin\observer-agent-desktop.exe
 ```
+
+发布用的构建脚本（Windows，生成与 Release 相同的 zip）：`pwsh scripts/build-desktop-release.ps1 -Version 1.2.0`，详见 [RELEASE §5](RELEASE.md#5-本地预演不推-tag)。
 
 - **首次启动**：没有 `agent.yaml` / 配置未完成时会直接进入 GUI 配置向导（机器 ID、hub、注册 token/接入 token、挂载点）。新节点用一次性注册 token；已有节点用机器行「获取接入 token」，粘贴后点「识别已有节点」自动填充 machine_id 与挂载点，保存后回到原节点。
 - 主界面「设置」页可修改显示名称与挂载点的显示名/目录/sentinel/排除规则/修复开关，可新增/删除挂载点；新增挂载点后需在 hub Web 触发一次基线巡检。删除为软删除（hub 保留历史数据）。

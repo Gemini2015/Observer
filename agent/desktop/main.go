@@ -6,6 +6,7 @@ import (
 	"embed"
 	"errors"
 	"flag"
+	"fmt"
 	"log"
 	"os"
 	"os/exec"
@@ -89,6 +90,12 @@ func init() {
 }
 
 func main() {
+	logWriter, closeLog := initDiagnostics()
+	defer closeLog()
+	if logPath != "" {
+		log.Printf("Observer Agent %s 启动，日志: %s", version.Version, logPath)
+	}
+
 	configPath := flag.String("config", "", "配置文件路径（默认：exe 同级目录下的 agent.yaml）")
 	flag.Parse()
 
@@ -96,13 +103,15 @@ func main() {
 	if resolved == "" {
 		executable, exeErr := os.Executable()
 		if exeErr != nil {
-			log.Fatalf("定位程序路径失败: %v", exeErr)
+			fatalStartup(fmt.Errorf("定位程序路径失败: %w", exeErr))
+			return
 		}
 		resolved = filepath.Join(filepath.Dir(executable), "agent.yaml")
 	}
 	absoluteConfig, err := filepath.Abs(resolved)
 	if err != nil {
-		log.Fatalf("解析配置路径失败: %v", err)
+		fatalStartup(fmt.Errorf("解析配置路径失败: %w", err))
+		return
 	}
 	// 让配置中的相对路径（token_file/state_dir/mounts）相对配置文件目录解析。
 	if err := os.Chdir(filepath.Dir(absoluteConfig)); err != nil {
@@ -137,6 +146,20 @@ func main() {
 	app := application.New(application.Options{
 		Name:        "Observer Agent",
 		Description: "Observer 文件完整性巡检客户端",
+		Logger:      wailsLogger(logWriter),
+		WarningHandler: func(message string) {
+			log.Printf("wails warning: %s", message)
+		},
+		ErrorHandler: func(err error) {
+			if err == nil {
+				return
+			}
+			if shouldShowStartupError(err) {
+				reportFatalError(err)
+				return
+			}
+			log.Printf("wails error: %v", err)
+		},
 		Assets: application.AssetOptions{
 			Handler: application.AssetFileServerFS(assets),
 		},
@@ -186,6 +209,9 @@ func main() {
 	window.RegisterHook(events.Common.WindowClosing, func(event *application.WindowEvent) {
 		event.Cancel()
 		window.Hide()
+	})
+	window.RegisterHook(events.Common.WindowShow, func(_ *application.WindowEvent) {
+		startupDone.Store(true)
 	})
 
 	tray := app.SystemTray.New()
@@ -258,7 +284,8 @@ func main() {
 	}
 
 	if err := app.Run(); err != nil {
-		log.Fatal(err)
+		reportFatalError(err)
+		os.Exit(1)
 	}
 	cancel()
 	c.stopRunner()

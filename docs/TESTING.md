@@ -11,7 +11,10 @@
 | `pnpm --filter web typecheck` / `test` / `build` | Web 控制台（含格式化/标签函数单测） |
 | `cd agent; go test ./...` | agent 各包（配置、规则、哈希、限速、缓存、扫描、修复、client 等） |
 | `cd agent; go vet ./...` | agent 静态检查 |
-| `cd agent/desktop; go vet ./...` | 桌面模块静态检查 |
+| `cd agent/desktop; go test .` | 桌面模块单测（含 `controller`/`setup`/`file_service`） |
+| `cd agent/desktop; go vet .` | 桌面模块静态检查 |
+| `cd agent/desktop && wails3 generate bindings ...` 后 `cd frontend && npm test` | 桌面前端单测（`labels`/`format`）；Vitest 的 Wails 插件需要先生成 bindings（或先跑 `scripts/build-desktop-release.ps1`） |
+| `pwsh scripts/build-desktop-release.ps1 -Version <ver>`（Windows） | 桌面端发布构建：PE GUI 子系统、版本注入、zip 内容 |
 
 ## 2. 验收脚本（drill）
 
@@ -50,7 +53,14 @@ pwsh ./scripts/bench.ps1 -Files 200 -SizeBytes 1048576   # 1MB × 200
 | agent 扫描/缓存/限速 | `cd agent && go test ./...` + `drill.ps1` + `drill-m3` |
 | 调度/多机 | `drill-m2` |
 | 部署/性能/聚合 | `drill-m4 -RunRegression` |
-| 发布前 | 上述全部 + `bench.ps1` |
+| 桌面端启动/发布 | `cd agent/desktop; go test . && go vet .` + 生成 bindings 后 `cd frontend; npm test` + Windows 双击冒烟（见下） |
+| 发布前 | 上述全部 + `bench.ps1` + `scripts/build-desktop-release.ps1` |
+
+**Windows 桌面端发布冒烟**（每次发布前，在 Windows 上）：
+
+1. 有 WebView2 的 Win10/11：解压 `observer-agent-desktop_<ver>_windows_amd64.zip` → 双击 exe → 向导/主窗口正常出现，无控制台窗口；关闭窗口隐藏到托盘；再次双击聚焦单实例。
+2. 无 WebView2 的机器/镜像：双击 exe 应弹出中文错误框（含 WebView2 下载地址和日志路径），日志文件写入 `%LocalAppData%\Observer\observer-agent-desktop.log`，不是静默闪退。
+3. `observer-agent_<ver>_windows_amd64.zip`：在 PowerShell 中 `.\observer-agent.exe version` 输出版本；双击只打印用法后退出（预期，包内 `README-WINDOWS.txt` 已说明）。
 
 ## 5. 最近一次完整结果（2026-10-29，Windows）
 

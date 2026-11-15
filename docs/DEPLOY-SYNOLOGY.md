@@ -38,7 +38,7 @@ sha256sum -c observer-agent_<ver>_linux_<arch>.tar.sha256
 
 > 如果 4 个架构 tar 都下载了，也可以 `sha256sum -c SHA256SUMS-docker`。
 
-> `<ver>` 是 tag 去掉 `v` 的版本，例如 `1.1.1`。当前 compose 模板使用 `1.1.1`；下载其他版本时同步替换 compose 中的镜像 tag。
+> `<ver>` 是 tag 去掉 `v` 的版本，例如 `1.2.0`。当前 compose 模板使用 `1.2.0`；下载其他版本时同步替换 compose 中的镜像 tag。
 
 ## 3. 导入镜像
 
@@ -345,7 +345,7 @@ sudo docker inspect <hub-container> --format '{{json .Mounts}}'
 
 # 用同一镜像探测目录是否可写（换成你的卷/目录）
 sudo docker run --rm -v observer-hub-data:/data --entrypoint sh \
-  observer-hub:1.1.1 -c 'id; ls -ld /data; touch /data/.probe && echo writable'
+  observer-hub:1.2.0 -c 'id; ls -ld /data; touch /data/.probe && echo writable'
 ```
 
 修复方式任选其一：
@@ -403,11 +403,11 @@ sudo docker volume rm observer-hub-data   # 确认备份后再执行
 
 ```bash
 docker buildx build --platform linux/amd64 \
-  -f deploy/Dockerfile.hub -t observer-hub:1.1.1 --load .
+  -f deploy/Dockerfile.hub -t observer-hub:1.2.0 --load .
 docker buildx build --platform linux/amd64 \
-  -f deploy/Dockerfile.agent -t observer-agent:1.1.1 --load .
-docker save -o observer-hub_1.1.1_linux_amd64.tar observer-hub:1.1.1
-docker save -o observer-agent_1.1.1_linux_amd64.tar observer-agent:1.1.1
+  -f deploy/Dockerfile.agent -t observer-agent:1.2.0 --load .
+docker save -o observer-hub_1.2.0_linux_amd64.tar observer-hub:1.2.0
+docker save -o observer-agent_1.2.0_linux_amd64.tar observer-agent:1.2.0
 ```
 
 arm64 把 `linux/amd64` 改为 `linux/arm64`。构建 hub/agent 需要访问 Docker Hub 与 gcr.io；国内网络可能失败，因此优先使用 Release 资产。

@@ -12,7 +12,7 @@
 
 services:
   agent:
-    image: observer-agent:1.1.1
+    image: observer-agent:1.2.0
     restart: unless-stopped
     read_only: true
     user: "65532:65532"

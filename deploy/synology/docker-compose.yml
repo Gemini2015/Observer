@@ -12,7 +12,7 @@
 
 services:
   hub:
-    image: observer-hub:1.1.1
+    image: observer-hub:1.2.0
     restart: unless-stopped
     # 若把共享文件夹 bind mount 到 /data 且报 SQLITE_CANTOPEN，取消下面两行注释：
     # 以 root 启动 → 入口脚本修正 /data 属主 → 降权到 node 运行。
@@ -45,7 +45,7 @@ services:
       start_period: 15s
 
   agent:
-    image: observer-agent:1.1.1
+    image: observer-agent:1.2.0
     restart: unless-stopped
     read_only: true
     user: "65532:65532"
