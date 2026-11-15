@@ -251,13 +251,33 @@ mounts:
 
 ## 8. 权限与属主
 
-- agent 以 distroless `nonroot`（UID/GID 65532）运行，容器根文件系统只读，只有 `/var/lib/observer` 卷可写。
+agent 以 distroless `nonroot`（UID/GID 65532）运行，容器根文件系统只读。**默认只需要一个可写目录**：
+
+| 目录 | 默认配置 | 需要权限 |
+| --- | --- | --- |
+| 状态卷 `/var/lib/observer` | `observer-agent-state` 命名卷 | 65532 可读写执行（`state.db`、`spool.jsonl`、`agent.token`） |
+| 共享文件夹（如 `/volume1/photo`） | `:ro` 挂载 | 65532 可读可进入（`r-x`），**不需要写** |
+| `agent.yaml` / sentinel | `:ro` / 直接读 | 65532 可读（0644） |
+| 修复目标目录 | `repair_allowed: false` | 无需写；改成 `true` 时共享文件夹必须去掉 `:ro`，且 65532 可写可执行 |
+
+> 完整写入点（含 `token_file`、`.observer-quarantine`、临时文件与空间占用）见 [CONFIG §2.1](CONFIG.md#21-文件系统写入点权限要求)。
+
 - 共享文件夹默认权限通常允许读取；若报 `permission denied` / `root not listable`：
   - 优先给扫描目录补读权限：`sudo chmod -R o+rX /volume1/photo`；
   - 若启用了 DSM「高级权限 / Windows ACL」，POSIX 位可能不够；可把 compose 的 `user:` 改成某个 DSM 用户（`id <user>` 查看 UID/GID）；
   - **改 `user:` 后状态卷属主也要同步**，否则 `/var/lib/observer` 写不进去。最简单是保持默认 65532。
 - `agent.yaml` 和 sentinel 需 65532 可读（一般 0644）。
-- 不建议在 NAS 上设 `repair_allowed: true`：修复会写共享文件夹并创建 quarantine，且需要可写挂载。
+- 不建议在 NAS 上设 `repair_allowed: true`：修复会写共享文件夹并创建 quarantine，且需要可写挂载；写出的文件权限为 `0600`。
+- 快速自检（distroless 镜像没有 `sh`，用一次性 alpine 容器、以 65532 身份挂同样的卷/目录）：
+  ```bash
+  sudo docker run --rm --user 65532:65532 \
+    -v observer-agent-state:/state \
+    -v /volume1/photo:/photo:ro \
+    alpine sh -c \
+    'touch /state/.probe && echo state-writable; rm -f /state/.probe; \
+     ls /photo >/dev/null && echo photo-readable'
+  ```
+  期望输出 `state-writable` 与 `photo-readable`；若前者失败，按 [§10.1](#101-hub-数据目录权限sqlite_cantopen) 的思路修正卷属主。
 
 ## 9. 运维
 

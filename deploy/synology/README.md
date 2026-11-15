@@ -27,6 +27,8 @@
 6. **启动**：Container Manager → 项目 → 新增 → 选择该目录/上传 compose → 构建并启动。
 7. **验证**：看容器日志。`doctor` 会独占状态缓存，需先停止 agent 再用同一镜像跑一次性容器（运行中 `docker exec ... doctor` 会报 `open state cache: timeout`）；也可以直接看日志与 Web 状态。打开 `http://<nas-ip>:8787`，用管理员口令登录，确认机器在线；在挂载点页手动触发一次全量巡检建立基线。
 
+> **权限**：默认只有 `observer-agent-state` 卷需要可写（65532）；共享文件夹用 `:ro` 只读挂载即可，除非把 `repair_allowed` 设为 `true`。细节见 [DEPLOY-SYNOLOGY §8](../../docs/DEPLOY-SYNOLOGY.md#8-权限与属主)。
+
 ## 路径映射
 
 - 每个共享文件夹 = compose 里一条 `volumes` + `agent.yaml` 里一个 `mounts`。

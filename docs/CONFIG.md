@@ -95,6 +95,30 @@ mounts:                       # 必填：至少一个
   - 同一台机器跑多个 agent 时，用不同的 `machine_id` 即自动隔离；也可显式配置 `state_dir`。
   - **容器/只读根文件系统**：必须显式配置 `state_dir`（如 `/var/lib/observer`）并挂载可写卷；若用 `OBSERVER_ENROLL_TOKEN` 而不是内联 `token`，还要显式配置 `token_file: /var/lib/observer/token`，否则配置校验会补上默认的 `.observer/token`，在只读根文件系统下注册成功后写 token 会失败。
 
+### 2.1 文件系统写入点（权限要求）
+
+agent 的写操作全部集中在**状态目录**；**巡检本身不写被扫描的目录**。下表按默认配置列出：
+
+| 路径 | 何时写 | 权限/模式 | 说明 |
+| --- | --- | --- | --- |
+| `state_dir`（默认 `.observer/<machine_id>`） | 始终 | 目录需 `w+x`（`0755`）；目录内文件 `0600` | 不存在时用 `MkdirAll(...0755)` 创建，因此**父目录也要可写**。内含 `state.db`、`spool.jsonl` |
+| `state_dir/state.db` | 始终 | `0600` | bbolt 缓存；文件锁在进程内，不需要额外锁文件 |
+| `state_dir/spool.jsonl` | hub 不可达时 | `0600` | 离线结果队列；重写时会创建 `spool.jsonl.tmp` 再 rename，二者同目录 |
+| `state_dir/agent.token` | 首次注册/换 token | `0600` | 长期 token 缓存 |
+| `token_file` 所在目录（仅配置了 `token_file`） | 首次注册/写回 token | `0600` | 该目录必须**已存在**且可写（不会自动创建父子链） |
+| mount 路径 | 默认**不需要写** | 只读即可 | 巡检只做 `stat`/打开/读取哈希；sentinel 也只读 |
+| `<mount>/<目标文件所在目录>` | 仅跨机修复作为**目标**（`repair_allowed: true`） | 目录 `w+x`；临时文件 `0600` | 创建 `.observer-repair-*.tmp`、fsync、原子 `rename`；目标文件父目录不存在时会 `MkdirAll(0755)` |
+| `<mount>/.observer-quarantine/` | 仅修复且目标文件存在 | 目录 `0755` | 旧文件 `rename` 进隔离目录，会额外占用空间 |
+
+要点：
+
+- **只读挂载 + 只读根文件系统都能跑**，前提是 `state_dir` 挂到可写卷、`agent.yaml` 可读、mount 可读（模板默认即如此）。
+- 只有开启 `repair_allowed: true` 的 mount 才需要可写；hub 在创建修复任务时会校验该标志（否则 403），agent 不会对其它 mount 写入。
+- 修复写入是**文件所在目录内**的临时文件 + 原子替换，因此不能把 mount 拆成「文件可写、目录不可写」；同时需要预留空间：临时文件 + quarantine 旧文件，单文件上限 1 GiB。
+- 注意：修复后的文件由 `os.CreateTemp`（`0600`）rename 而来，**权限会变成 `0600`**、属主为 agent 运行用户；如目录里有依赖组/其它用户读取的共享文件，修复后需要自行 `chmod`/ACL 修正。
+- 巡检/哈希不产生临时文件，也不使用系统 `TMPDIR`；磁盘不足主要影响 `state.db` 增长与修复。
+- 容器里建议只挂一个状态卷（如 `/var/lib/observer`），`read_only: true` 的根文件系统无需额外可写目录。
+
 ## 3. 限速语义
 
 - 双闸：`bytes_per_sec`（字节信用卡）与 `files_per_sec`（文件数）。
