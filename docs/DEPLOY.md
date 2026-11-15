@@ -142,7 +142,7 @@ spctl -a -vv "bin/Observer Agent.app"
 | Linux amd64 / arm64 交叉编译、ELF、大小 | ✅ 已验证（7.3 / 6.8 MiB） |
 | Dockerfile.hub / compose（hub） | ✅ 2026-11-05 在 WSL2 Ubuntu + Docker 29 实测：镜像 build、healthcheck、卷保留升级、数据与在线 agent 均正常；2026-11-15 Apple container 1.7.1 arm64 build + `/healthz` 通过，amd64（Rosetta）build + `/healthz` 通过 |
 | Dockerfile.agent / compose（agent） | ⚠️ 2026-11-15 在 Apple container 1.7.1 本地 arm64 build + hub/agent 端到端（注册/心跳/全量扫描/sentinel/状态卷）通过；compose 与群晖真机待验 |
-| Docker 镜像 CI（hub/agent × amd64/arm64 → Release tar） | ⚠️ workflow 已实现，待首次预发布 tag 验证 |
+| Docker 镜像 CI（hub/agent × amd64/arm64 → Release tar） | ✅ 2026-11-15 run `43698923356`：4 个镜像 build/smoke/`docker save`/`docker load` 通过，资产已上传 Release |
 | 群晖 Container Manager（镜像导入/项目/路径映射） | ❌ 未在真实 DSM 验证；模板与文档静态校验通过 |
 | systemd unit | ✅ 静态检查（本机无 systemd 环境，未实际启动） |
 | Windows agent / 桌面 exe | ✅ 构建、启动、单实例 |
@@ -150,3 +150,4 @@ spctl -a -vv "bin/Observer Agent.app"
 | macOS 构建 / 签名 / 公证 | ❌ 未验证（需 Mac + Apple 证书） |
 | 性能基准 | ✅ 见 [PLAN-M4](PLAN-M4.md) §4 |
 | GitHub Actions Release（tag → 三平台产物 + SHA256SUMS） | ✅ 2026-11-11 试发布 `v0.0.0-rc.1` 通过：Actions run 成功、Release 为 pre-release、下载资产 sha256 一致、linux/amd64 静态链接且 `version` 输出正确；流程见 [RELEASE](RELEASE.md) |
+| GitHub Actions Release（v1.1.0：二进制 + 4 个镜像 tar） | ✅ 2026-11-15 run `43698923356`：hub/agent × amd64/arm64 镜像、各自 `.sha256`、`SHA256SUMS-docker` 与二进制同时发布；下载 agent tar 校验通过且 `manifest.json` 标签/架构正确 |

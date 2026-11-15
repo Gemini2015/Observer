@@ -154,4 +154,8 @@ docker load -i "observer-hub_${VERSION}_linux_amd64.tar"   # 回归确认是 Doc
   - GitHub Release 标题 `observer-agent v1.0.0`，标记 **Latest**（非 pre-release），含 3 个归档 + `SHA256SUMS`；
   - 下载资产 `sha256sum -c` 全部通过，linux/amd64 `observer-agent version` 输出 `1.0.0`，静态链接检查通过。
 - `v0.0.0-rc.1` 仅用于流水线验证，可在 Release 页面删除；正式版本始终由开发者按 §1 手动打 `vX.Y.Z` tag。
-- 2026-11-15：workflow 扩展为「二进制 + 4 个 Docker 镜像 tar」；该能力尚未在 tag 上实际验证，首次使用请按 §5 推临时预发布 tag 确认镜像资产与 `SHA256SUMS-docker`。
+- 2026-11-15：发布 `v1.1.0`（tag 指向 `3ca4a59`；同一天因 hub 冒烟测试绑定地址问题修复后重新指向修复提交）。
+  - Actions run `43698923356` 成功；首次 run `43698024317` 的 hub 镜像冒烟因容器内监听 `127.0.0.1` 无法通过端口映射访问而失败，改为 `0.0.0.0` 后重跑通过。
+  - GitHub Release 标题 `Observer v1.1.0`，非 pre-release；包含 3 个二进制归档 + `SHA256SUMS`，以及 4 个镜像 tar + 各自 `.sha256` + `SHA256SUMS-docker`。
+  - 下载 agent amd64 tar 校验通过：`manifest.json` 的 RepoTags 为 `observer-agent:1.1.0`，配置架构 amd64，labels version `1.1.0`。
+  - hub 镜像 tar 大小 360/377 MB（amd64/arm64），均低于 GitHub 2 GiB 限制；CI 已用 `docker load` 回归 Docker archive。
