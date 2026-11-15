@@ -144,14 +144,6 @@ jobs:
             "dist/desktop/observer-agent-desktop_${VERSION}_windows_amd64.zip" \
             --clobber
 
-      - name: Upload checksum fragment
-        uses: actions/upload-artifact@v4
-        with:
-          name: sha-desktop
-          path: dist/desktop/*.sha256
-          retention-days: 3
-          if-no-files-found: error
-
   # 合并 CLI + 桌面端校验和，并在二进制资产都上传成功后再给 Release 正文加下载指引。
   # 放在 finalize job 里，避免桌面端构建失败时 Release 正文宣传不存在的资产。
   finalize-release:
@@ -161,33 +153,27 @@ jobs:
     timeout-minutes: 5
 
     steps:
-      - name: Download desktop checksum
-        uses: actions/download-artifact@v4
-        with:
-          name: sha-desktop
-          path: sums
-
       - name: Merge binary checksums
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           version="${{ needs.release.outputs.version }}"
-          rm -f SHA256SUMS SHA256SUMS.merged
-          gh release download "$GITHUB_REF_NAME" --pattern 'SHA256SUMS' --output SHA256SUMS
-          sed -i 's/\r$//' SHA256SUMS sums/*.sha256
-          # 去掉旧的桌面端行（只重跑 desktop/finalize 时可能存在），换成本次构建的校验和。
-          desktop="observer-agent-desktop_${version}_windows_amd64.zip"
-          grep -vF "  ${desktop}" SHA256SUMS >SHA256SUMS.merged || true
-          cat sums/*.sha256 >>SHA256SUMS.merged
-          sort -k2 -u SHA256SUMS.merged -o SHA256SUMS
-          rm -f SHA256SUMS.merged
+          rm -rf assets SHA256SUMS
+          mkdir -p assets
+          files=(
+            "observer-agent_${version}_linux_amd64.tar.gz"
+            "observer-agent_${version}_linux_arm64.tar.gz"
+            "observer-agent_${version}_windows_amd64.zip"
+            "observer-agent-desktop_${version}_windows_amd64.zip"
+          )
+          # 以 Release 上实际可下载的文件为准重算校验和，避免构建期校验和与上传文件不一致。
+          for file in "${files[@]}"; do
+            gh release download "$GITHUB_REF_NAME" --pattern "$file" --dir assets
+          done
+          ( cd assets && sha256sum "${files[@]}" > ../SHA256SUMS )
           cat SHA256SUMS
-          for file in \
-            "observer-agent_${version}_linux_amd64.tar.gz" \
-            "observer-agent_${version}_linux_arm64.tar.gz" \
-            "observer-agent_${version}_windows_amd64.zip" \
-            "observer-agent-desktop_${version}_windows_amd64.zip"; do
+          for file in "${files[@]}"; do
             if ! grep -Fq "  ${file}" SHA256SUMS; then
               echo "::error::SHA256SUMS missing ${file}"
               exit 1

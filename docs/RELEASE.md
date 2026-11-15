@@ -31,11 +31,11 @@ git push origin v1.3.0
 3. **测试门禁**：`cd agent && go test ./...`；
 4. **构建打包 CLI**：`bash scripts/build-release.sh "$VERSION" dist/release`；
 5. **发布 Release**：`softprops/action-gh-release@v2` 创建/更新 Release，自动生成 release notes，上传 3 个 CLI 归档与 `SHA256SUMS`；
-6. **构建 Windows 桌面端**：`desktop` job 在 `windows-latest` 上安装 Go（`agent/desktop/go.mod`）、Node 24 与 `wails3 v3.0.0`，执行 `pwsh scripts/build-desktop-release.ps1 -Version "$VERSION" -OutDir dist/desktop`；脚本会构建前端、生成 bindings/syso、以 `-H windowsgui` 和版本 ldflags 构建 exe，断言 PE `Subsystem=2`、版本字符串与 zip 内容；随后跑 `go test .`/`go vet .`/`npm test`，`gh release upload` 上传桌面端 zip，并上传 `.sha256` 片段 artifact；
+6. **构建 Windows 桌面端**：`desktop` job 在 `windows-latest` 上安装 Go（`agent/desktop/go.mod`）、Node 24 与 `wails3 v3.0.0`，执行 `pwsh scripts/build-desktop-release.ps1 -Version "$VERSION" -OutDir dist/desktop`；脚本会构建前端、生成 bindings/syso、以 `-H windowsgui` 和版本 ldflags 构建 exe，断言 PE `Subsystem=2`、版本字符串与 zip 内容；随后跑 `go test .`/`go vet .`/`npm test`，`gh release upload` 上传桌面端 zip；
 7. **构建 Docker 镜像**：`docker` job matrix（hub/agent × amd64/arm64）用 Buildx 构建，arm64 在 QEMU 下执行；每个镜像做架构断言、agent `version` 冒烟或 hub `/healthz` 冒烟；
 8. **导出并上传镜像**：`docker save` 成 `.tar`，`docker load` 回归确认是 Docker archive，校验大小 < 2 GiB，`gh release upload` 把 tar 和同名 `.sha256` 上传到同一 Release；
 9. **汇总镜像校验和**：`docker-checksums` job 汇总 4 个 tar 的 SHA-256，上传 `SHA256SUMS-docker`；
-10. **合并二进制校验和 + Release 说明**：`finalize-release` job 依赖 release 与 desktop，下载 `sha-desktop` artifact 和 Release 的 `SHA256SUMS`，合并为 4 个二进制归档的校验和（`desktop` 失败则不执行，避免说明里出现不存在的资产），并把「下载哪个包」指引 prepend 到 Release 正文（以该标题作为已存在标记，重跑幂等）。
+10. **合并二进制校验和 + Release 说明**：`finalize-release` job 依赖 release 与 desktop，按版本号从 Release 下载 4 个二进制归档并重新计算 SHA-256 生成 `SHA256SUMS`（以实际发布文件为准；`desktop` 失败则不执行，避免说明里出现不存在的资产），再把「下载哪个包」指引 prepend 到 Release 正文（以该标题作为已存在标记，重跑幂等）。
 
 权限：workflow 声明 `contents: write`；同一 tag 的发布串行（concurrency）。桌面端、镜像或 finalize job 失败时 workflow 为红；重跑会覆盖同名资产。`SHA256SUMS` 只在桌面端成功后才会包含 GUI 归档；桌面端失败时 Release 仍有 3 个 CLI 归档，重跑即可补齐。
 
