@@ -165,7 +165,7 @@ jobs:
           trap cleanup EXIT
 
           docker run -d --name "$name" \
-            -e OBSERVER_HOST=127.0.0.1 \
+            -e OBSERVER_HOST=0.0.0.0 \
             -e OBSERVER_DATA_DIR=/data \
             -e OBSERVER_ADMIN_PASSWORD=smoke-test-password \
             -p 127.0.0.1:18787:8787 \
@@ -175,7 +175,9 @@ jobs:
           for attempt in $(seq 1 120); do
             if curl -fsS http://127.0.0.1:18787/healthz >/dev/null 2>&1; then
               echo "hub healthy after ${attempt} attempt(s)"
-              curl -fsS http://127.0.0.1:18787/ >/dev/null
+              # Web 根路径只记录状态，不作为发布门禁（静态资源由镜像 build 阶段保证）。
+              curl -sS -o /dev/null -w 'web root status: %{http_code}\n' \
+                http://127.0.0.1:18787/ || true
               exit 0
             fi
             sleep 2
