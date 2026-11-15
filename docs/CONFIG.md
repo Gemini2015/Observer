@@ -18,6 +18,11 @@
 | `OBSERVER_OFFLINE_AFTER_SECONDS` | `90` | 心跳超过该秒数标记机器 offline |
 | `NODE_ENV` | `development` | `production` 时启用口令强校验 |
 
+容器镜像额外支持 `OBSERVER_FIX_DATA_PERMISSIONS`（只由 `observer-hub` 镜像入口脚本读取，hub 进程本身不解析）：
+设为 `1` 且容器以 root 启动时，入口先修正数据目录属主（`chown -R node:node "$OBSERVER_DATA_DIR"`），
+再降权到 `node` 运行；用于群晖共享文件夹 bind mount 到 `/data` 时报 `SQLITE_CANTOPEN` 的场景。
+细节见 [DEPLOY-SYNOLOGY §10.1](DEPLOY-SYNOLOGY.md#101-hub-数据目录权限sqlite_cantopen)。
+
 数据目录内容：
 
 | 路径 | 说明 |

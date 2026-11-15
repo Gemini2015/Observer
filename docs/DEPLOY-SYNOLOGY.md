@@ -38,7 +38,7 @@ sha256sum -c observer-agent_<ver>_linux_<arch>.tar.sha256
 
 > 如果 4 个架构 tar 都下载了，也可以 `sha256sum -c SHA256SUMS-docker`。
 
-> `<ver>` 是 tag 去掉 `v` 的版本，例如 `1.1.0`。当前 compose 模板使用 `1.1.0`；下载其他版本时同步替换 compose 中的镜像 tag。
+> `<ver>` 是 tag 去掉 `v` 的版本，例如 `1.1.1`。当前 compose 模板使用 `1.1.1`；下载其他版本时同步替换 compose 中的镜像 tag。
 
 ## 3. 导入镜像
 
@@ -83,7 +83,8 @@ sudo docker image inspect observer-agent:<ver> --format '{{.Architecture}}'
 
 - `OBSERVER_ADMIN_PASSWORD`：改成自己的管理员口令（不要保留 `change-me-please`）；
 - `8787:8787`：如果端口被占用，改成如 `18787:8787`；
-- `observer-hub-data:/data`：保留命名卷，升级/重启不丢 SQLite 和修复中转数据。
+- `observer-hub-data:/data`：保留命名卷，升级/重启不丢 SQLite 和修复中转数据；
+- `/data` 必须能被容器用户（默认 uid 1000 / `node`）写入。如果改成共享文件夹 bind mount，请先看 [§10.1 hub 数据目录权限](#101-hub-数据目录权限sqlite_cantopen)。
 
 ### 5.2 生成 agent token
 
@@ -297,6 +298,84 @@ mounts:
 | `doctor` 报 `open state cache: timeout` | agent 正在运行并占用 bbolt 缓存 | 停止 agent 后用一次性容器运行 doctor |
 | 调度不跑 | 没有基线/不在窗口/mount 非 active | 手动全量巡检建基线；窗口按 hub 时区 |
 | `@eaDir`/回收站大量文件 | 未排除 | 使用模板 exclude |
+| `SQLITE_CANTOPEN` / `unable to open database file` | `/data` 对容器用户不可写 | 见 [§10.1](#101-hub-数据目录权限sqlite_cantopen) |
+
+### 10.1 hub 数据目录权限（SQLITE_CANTOPEN）
+
+hub 启动时报：
+
+```text
+SqliteError: unable to open database file
+code: 'SQLITE_CANTOPEN'
+at openDb (file:///app/hub/dist/db/index.js:...)
+```
+
+含义：**容器内 `/data` 目录不允许 hub 进程（默认 uid 1000 / `node`）创建 SQLite 文件**。常见原因：
+
+- 把共享文件夹 bind mount 到 `/data`，目录属主是 `root` 或你的 DSM 用户（如 1026），权限 755；
+- 挂载是只读（`:ro`）；
+- `OBSERVER_DATA_DIR` 指向不存在的子目录，且父目录不可写；
+- 之前手工 `docker volume create` 过同名卷，里面已有 root 属主内容，Docker 不会重新继承镜像属主。
+
+先确认现状（`observer-hub:1.1.1` 起报错信息会直接给出 uid 和路径）：
+
+```bash
+# 看容器真实挂载
+sudo docker inspect <hub-container> --format '{{json .Mounts}}'
+
+# 用同一镜像探测目录是否可写（换成你的卷/目录）
+sudo docker run --rm -v observer-hub-data:/data --entrypoint sh \
+  observer-hub:1.1.1 -c 'id; ls -ld /data; touch /data/.probe && echo writable'
+```
+
+修复方式任选其一：
+
+**A. 改目录属主（推荐，共享文件夹场景）**
+
+```bash
+sudo chown -R 1000:1000 /volume1/docker/observer/data
+```
+
+若启用了 DSM「高级权限 / Windows ACL」，还要在 File Station → 属性 → 权限里确认对应 UID 有读写，可用 `sudo synoacltool -get /volume1/docker/observer/data` 查看。
+
+**B. 让 hub 用你的 DSM 用户运行**
+
+```yaml
+services:
+  hub:
+    user: "1026:100"   # 用 SSH 的 id -u / id -g 替换
+```
+
+该 UID 必须能写该目录（同 A 的权限要求）。
+
+**C. 自动修正（`v1.1.1` 起）**
+
+```yaml
+services:
+  hub:
+    user: "0:0"
+    environment:
+      OBSERVER_FIX_DATA_PERMISSIONS: "1"
+```
+
+入口脚本会先 `chown /data`，再降权到 `node` 启动；hub 主进程仍是非 root。前提：`/data` 里没有需要保留的其他属主。
+
+**D. 回到命名卷（模板默认）**
+
+```yaml
+volumes:
+  - observer-hub-data:/data
+```
+
+Docker 首次创建空卷时会继承镜像内 `/data` 的 `1000:1000`。如果这个卷是之前用别的配置创建、里面已有 root 文件，需要先备份数据再重建卷：
+
+```bash
+sudo docker run --rm -v observer-hub-data:/from -v /volume1/docker/observer-backup:/to \
+  alpine sh -c 'cp -a /from/. /to/'
+sudo docker volume rm observer-hub-data   # 确认备份后再执行
+```
+
+> `v1.1.0` 及更早版本只会抛原始 SQLite 错误；`v1.1.1` 起会在错误里给出数据目录、运行 UID，以及上述修复提示。
 
 ## 11. 从源码构建（可选，不推荐在 NAS 上做）
 
@@ -304,11 +383,11 @@ mounts:
 
 ```bash
 docker buildx build --platform linux/amd64 \
-  -f deploy/Dockerfile.hub -t observer-hub:1.1.0 --load .
+  -f deploy/Dockerfile.hub -t observer-hub:1.1.1 --load .
 docker buildx build --platform linux/amd64 \
-  -f deploy/Dockerfile.agent -t observer-agent:1.1.0 --load .
-docker save -o observer-hub_1.1.0_linux_amd64.tar observer-hub:1.1.0
-docker save -o observer-agent_1.1.0_linux_amd64.tar observer-agent:1.1.0
+  -f deploy/Dockerfile.agent -t observer-agent:1.1.1 --load .
+docker save -o observer-hub_1.1.1_linux_amd64.tar observer-hub:1.1.1
+docker save -o observer-agent_1.1.1_linux_amd64.tar observer-agent:1.1.1
 ```
 
 arm64 把 `linux/amd64` 改为 `linux/arm64`。构建 hub/agent 需要访问 Docker Hub 与 gcr.io；国内网络可能失败，因此优先使用 Release 资产。

@@ -10,13 +10,13 @@
 - 里程碑 tag（`m1`–`m4`）不匹配 `v*.*.*`，不会触发。
 
 ```bash
-# 正式发布（示例为下一个版本号；当前最新正式版为 v1.1.0）
-git tag -a v1.1.0 -m "Observer v1.1.0"
-git push origin v1.1.0
+# 正式发布（示例为下一个版本号；当前最新正式版为 v1.1.1）
+git tag -a v1.2.0 -m "Observer v1.2.0"
+git push origin v1.2.0
 ```
 
 发布版本 = tag 去掉 `v` 前缀，通过 `-ldflags "-X observer/agent/internal/version.Version=<ver>"` 写入二进制与 agent 镜像，
-因此 `observer-agent version`（二进制或容器内）输出发布版本（仓库默认值 `1.1.0`，发布时仍按 tag 覆盖）。
+因此 `observer-agent version`（二进制或容器内）输出发布版本（仓库默认值 `1.1.1`，发布时仍按 tag 覆盖）。
 
 同一次发布还会构建 hub/agent 的 **linux/amd64** 与 **linux/arm64** Docker 镜像，以 `docker save` 的 Docker archive tar 附到 Release，供群晖 Container Manager 等离线导入；**不推 Docker Hub/GHCR**。
 
@@ -52,15 +52,15 @@ git push origin v1.1.0
 
 所有二进制均为 `CGO_ENABLED=0` 纯静态；Linux 版 `ldd` 显示 not a dynamic executable。
 
-Docker 镜像仅发布 amd64/arm64，不发布 ARMv7；镜像 tag 使用去掉 `v` 的版本号（如 `1.1.0`），不使用 `latest`。
+Docker 镜像仅发布 amd64/arm64，不发布 ARMv7；镜像 tag 使用去掉 `v` 的版本号（如 `1.1.1`），不使用 `latest`。
 
 ## 4. 校验下载的产物
 
 ```bash
 sha256sum -c SHA256SUMS
-tar -tzf observer-agent_1.1.0_linux_amd64.tar.gz        # 查看内容
-tar -xzf observer-agent_1.1.0_linux_amd64.tar.gz
-./observer-agent version                                 # 输出 1.1.0
+tar -tzf observer-agent_1.1.1_linux_amd64.tar.gz        # 查看内容
+tar -xzf observer-agent_1.1.1_linux_amd64.tar.gz
+./observer-agent version                                 # 输出 1.1.1
 ```
 
 Windows：解压 zip 后执行 `observer-agent.exe version`，应输出同一版本号。
@@ -69,15 +69,15 @@ Docker 镜像：
 
 ```bash
 # 只下载当前架构时，用同名 .sha256 校验（或给合并文件加 --ignore-missing）
-sha256sum -c observer-hub_1.1.0_linux_amd64.tar.sha256
-sha256sum -c observer-agent_1.1.0_linux_amd64.tar.sha256
+sha256sum -c observer-hub_1.1.1_linux_amd64.tar.sha256
+sha256sum -c observer-agent_1.1.1_linux_amd64.tar.sha256
 
-docker load -i observer-hub_1.1.0_linux_amd64.tar
-docker load -i observer-agent_1.1.0_linux_amd64.tar
-docker image inspect observer-hub:1.1.0 --format '{{.Architecture}}'
-docker image inspect observer-agent:1.1.0 --format '{{.Architecture}}'
+docker load -i observer-hub_1.1.1_linux_amd64.tar
+docker load -i observer-agent_1.1.1_linux_amd64.tar
+docker image inspect observer-hub:1.1.1 --format '{{.Architecture}}'
+docker image inspect observer-agent:1.1.1 --format '{{.Architecture}}'
 
-docker run --rm observer-agent:1.1.0 version
+docker run --rm observer-agent:1.1.1 version
 ```
 
 如果下载了全部 4 个镜像，也可以 `sha256sum -c SHA256SUMS-docker`。
@@ -90,12 +90,12 @@ docker run --rm observer-agent:1.1.0 version
 
 ```bash
 # 方案 A：开发机已装 Go（tar/zip 可用）
-bash scripts/build-release.sh v1.1.0 dist/release
+bash scripts/build-release.sh v1.2.0 dist/release
 
 # 方案 B：没有 Go 时用容器（产物写入仓库 dist/release，gitignore 范围）
 docker run --rm -v "${PWD}:/src" -w /src golang:1.27-bookworm \
   bash -lc 'apt-get update -qq && apt-get install -y -qq zip >/dev/null && \
-            bash scripts/build-release.sh v1.1.0 /src/dist/release'
+            bash scripts/build-release.sh v1.2.0 /src/dist/release'
 ```
 
 脚本会自检：linux/amd64 产物 `version` 输出必须等于传入版本，并生成、校验 `SHA256SUMS`。
@@ -103,7 +103,7 @@ docker run --rm -v "${PWD}:/src" -w /src golang:1.27-bookworm \
 本地构建/导出 Docker 镜像（需要 Docker + buildx）：
 
 ```bash
-VERSION=1.1.0
+VERSION=1.2.0
 docker buildx build --platform linux/amd64 \
   --build-arg VERSION="$VERSION" --build-arg REVISION="local" \
   -f deploy/Dockerfile.hub -t "observer-hub:$VERSION" --load .
@@ -125,7 +125,7 @@ docker load -i "observer-hub_${VERSION}_linux_amd64.tar"   # 回归确认是 Doc
 - **重跑**：Actions → 选中 run →「Re-run all jobs」。同名 tag 重跑会更新同一个 Release，资产同名覆盖。
 - **删除发布**：先删除 GitHub Release（页面），再删除远端 tag：
   ```bash
-  git push origin :refs/tags/v1.1.0
+  git push origin :refs/tags/v1.2.0
   ```
 - 已经分发的版本号不要复用；修正问题请发新的 patch 版本。
 

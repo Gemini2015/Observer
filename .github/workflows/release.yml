@@ -1,8 +1,8 @@
 name: Release agent and images
 
 # 开发者手动打 tag 并推送后触发（workflow 不创建/移动/删除任何 tag）：
-#   git tag -a v1.1.0 -m "Observer v1.1.0"
-#   git push origin v1.1.0
+#   git tag -a v1.2.0 -m "Observer v1.2.0"
+#   git push origin v1.2.0
 on:
   push:
     tags:

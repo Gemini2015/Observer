@@ -12,9 +12,13 @@
 
 services:
   hub:
-    image: observer-hub:1.1.0
+    image: observer-hub:1.1.1
     restart: unless-stopped
+    # 若把共享文件夹 bind mount 到 /data 且报 SQLITE_CANTOPEN，取消下面两行注释：
+    # 以 root 启动 → 入口脚本修正 /data 属主 → 降权到 node 运行。
+    # user: "0:0"
     environment:
+      # OBSERVER_FIX_DATA_PERMISSIONS: "1"
       OBSERVER_HOST: "0.0.0.0"
       OBSERVER_DATA_DIR: /data
       OBSERVER_PORT: "8787"
@@ -25,6 +29,7 @@ services:
     ports:
       - "8787:8787"
     volumes:
+      # 命名卷首次创建会继承镜像内 /data 的 1000:1000；换成共享文件夹时先看文档 §10.1
       - observer-hub-data:/data
     healthcheck:
       test:
@@ -40,7 +45,7 @@ services:
       start_period: 15s
 
   agent:
-    image: observer-agent:1.1.0
+    image: observer-agent:1.1.1
     restart: unless-stopped
     read_only: true
     user: "65532:65532"

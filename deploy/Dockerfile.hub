@@ -65,6 +65,12 @@ COPY --from=build /app/web/package.json ./web/package.json
 # named volume 首次创建时会继承该目录的属主；否则 node 用户无法写 SQLite。
 RUN mkdir -p /data && chown node:node /data
 
+# 入口：默认以 node 运行；以 root 启动且 OBSERVER_FIX_DATA_PERMISSIONS=1 时，
+# 先修正数据目录属主再降权到 node（群晖共享文件夹 bind mount 场景）。
+COPY deploy/docker-entrypoint.hub.sh /usr/local/bin/docker-entrypoint.sh
+RUN chmod 0755 /usr/local/bin/docker-entrypoint.sh
+
 USER node
 EXPOSE 8787
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
 CMD ["node", "hub/dist/main.js"]
