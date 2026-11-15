@@ -1,12 +1,21 @@
 # Observer agent（NAS / Linux 容器）
 # 构建上下文：仓库根目录；用法：
 #   docker build -f deploy/Dockerfile.agent -t observer-agent .
+#   docker buildx build --platform linux/arm64 -f deploy/Dockerfile.agent -t observer-agent .
 #   docker run --rm -v $PWD/deploy/agent.example.yaml:/etc/observer/agent.yaml:ro \
 #     -v /path/to/media:/media:ro -v observer-agent-state:/var/lib/observer \
 #     -e OBSERVER_ENROLL_TOKEN=... observer-agent
+#
+# 可选构建参数：
+#   VERSION      写入 observer-agent version（默认 dev）
+#   REVISION     OCI label 的 revision（默认 unknown）
+#   GOPROXY      Go 模块代理；国内网络可传 https://goproxy.cn,direct
 
 # syntax=docker/dockerfile:1
 FROM golang:1.27 AS build
+ARG VERSION=dev
+ARG GOPROXY=https://proxy.golang.org,direct
+ENV GOPROXY=${GOPROXY}
 WORKDIR /src
 
 COPY agent/go.mod agent/go.sum ./
@@ -17,12 +26,20 @@ COPY agent/ ./
 ARG TARGETOS
 ARG TARGETARCH
 RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH:-amd64} \
-    go build -trimpath -ldflags="-s -w" -o /out/observer-agent ./cmd/observer-agent
+    go build -trimpath \
+    -ldflags="-s -w -X observer/agent/internal/version.Version=${VERSION}" \
+    -o /out/observer-agent ./cmd/observer-agent
 # 在 builder 中创建状态目录并设置 nonroot 属主；distroless 没有 shell/chown。
 RUN mkdir -p /out/observer-state && touch /out/observer-state/.keep \
     && chown -R 65532:65532 /out/observer-state
 
 FROM gcr.io/distroless/static-debian12:nonroot
+ARG VERSION=dev
+ARG REVISION=unknown
+LABEL org.opencontainers.image.title="observer-agent" \
+      org.opencontainers.image.version="${VERSION}" \
+      org.opencontainers.image.revision="${REVISION}" \
+      org.opencontainers.image.source="https://github.com/Gemini2015/Observer"
 COPY --from=build --chown=nonroot:nonroot /out/observer-state /var/lib/observer
 COPY --from=build /out/observer-agent /usr/local/bin/observer-agent
 USER nonroot:nonroot

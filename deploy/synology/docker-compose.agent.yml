@@ -1,0 +1,32 @@
+# Observer 群晖 Container Manager 项目（仅 agent；hub 在另一台机器）
+#
+# 使用前：
+# 1. 从 GitHub Release 导入对应架构的 observer-agent:<version>。
+# 2. 复制 agent.example.yaml 为 agent.yaml，把 hub 改成
+#      http://<hub 的局域网 IP 或域名>:8787
+#    不能写 127.0.0.1（那是容器自己）。
+# 3. 在共享文件夹根目录创建 .observer-mount。
+# 4. Container Manager → 项目 → 使用本目录创建项目。
+#
+# 完整说明见 ../../docs/DEPLOY-SYNOLOGY.md。
+
+services:
+  agent:
+    image: observer-agent:1.1.0
+    restart: unless-stopped
+    read_only: true
+    user: "65532:65532"
+    command: ["run", "-config", "/etc/observer/agent.yaml"]
+    volumes:
+      - ./agent.yaml:/etc/observer/agent.yaml:ro
+      # 默认同路径映射；按实际共享文件夹增删
+      - /volume1/photo:/volume1/photo:ro
+      - observer-agent-state:/var/lib/observer
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  observer-agent-state:

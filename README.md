@@ -8,7 +8,7 @@
 
 Observer 由**中心服（hub）**和部署在各台机器上的 **agent** 组成。agent 定期校验本地文件哈希，与 hub 保存的基线比对；发现内容不一致、文件缺失或不可读时生成异常，并可从另一台机器的健康副本跨机恢复。
 
-**状态：v1.0.0（agent 已发布，见 [发布流程](docs/RELEASE.md)）；M1–M4 已完成（tag `m1`–`m4`）；后续规划见 [docs/ROADMAP.md](docs/ROADMAP.md)。**
+**状态：v1.1.0（agent 已发布，见 [发布流程](docs/RELEASE.md)）；M1–M4 已完成（tag `m1`–`m4`）；后续规划见 [docs/ROADMAP.md](docs/ROADMAP.md)。**
 
 ## 能力
 
@@ -19,7 +19,7 @@ Observer 由**中心服（hub）**和部署在各台机器上的 **agent** 组�
 - **调度**：按窗口 + 每日预算 + 间隔自动派发，跨午夜窗口，心跳超时机器标记离线。
 - **修复**：内容哈希全等的副本关联；hub 中转分块传输；目标端 quarantine + 原子替换 + 复核；全程审计。
 - **界面**：React Web 控制台（总览/机器与挂载点/文件/任务/异常/修复/审计/系统）；Wails 桌面客户端（托盘/单实例/自启，运行控制与本机文件查看）。
-- **部署**：systemd、Docker Compose、Linux amd64/arm64 交叉编译。
+- **部署**：systemd、Docker Compose、群晖 Container Manager（Release 镜像导入）、Linux amd64/arm64 交叉编译。
 
 ## 架构
 
@@ -64,4 +64,5 @@ docs/        需求、设计、计划、部署与测试文档
 | 计划 | [M1](docs/PLAN-M1.md) / [M2](docs/PLAN-M2.md) / [M3](docs/PLAN-M3.md) / [M4](docs/PLAN-M4.md) | 各里程碑范围、设计与验收记录 |
 | 测试 | [测试与验收](docs/TESTING.md) | 单测、drill M1–M4、性能基准、回归矩阵 |
 | 部署 | [部署与打包](docs/DEPLOY.md) | NAS systemd/Docker、Windows、macOS 签名公证 |
-| 发布 | [发布流程](docs/RELEASE.md) | 手动 tag 触发 GitHub Actions 构建 agent 并发布 Release |
+| 部署 | [群晖 Container Manager](docs/DEPLOY-SYNOLOGY.md) | 导入 Release 镜像、项目创建、路径映射、权限与排错 |
+| 发布 | [发布流程](docs/RELEASE.md) | 手动 tag 触发 GitHub Actions 构建 agent 与 Docker 镜像并发布 Release |

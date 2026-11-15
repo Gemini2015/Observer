@@ -86,6 +86,12 @@ docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.local.yml \
 - 回滚：升级前 `docker tag observer-hub:local observer-hub:local-backup-<日期>`；需要时停新容器，用备份镜像按原参数 `docker run`。
 - WSL 关机后重新 `wsl -d Ubuntu` 即可恢复（Docker 服务已 enable，容器 `restart: unless-stopped`）；hub 仅绑定 `127.0.0.1`，不会暴露到局域网。
 
+### 群晖 Container Manager（Release 镜像）
+
+群晖不需要在 NAS 上 build：Release 附带 amd64/arm64 的 hub/agent `docker save` tar，导入 Container Manager 后用 [deploy/synology](../deploy/synology/) 模板启动。适合只读共享文件夹巡检、无入站端口、非 root 运行。
+
+完整步骤（架构选择、镜像导入、项目创建、路径映射、sentinel、权限与排错）见 [DEPLOY-SYNOLOGY](DEPLOY-SYNOLOGY.md)。
+
 ## 4. Windows
 
 - agent：`go build -o bin/observer-agent.exe ./cmd/observer-agent`（已验证）。
@@ -134,8 +140,10 @@ spctl -a -vv "bin/Observer Agent.app"
 | 项 | 状态 |
 | --- | --- |
 | Linux amd64 / arm64 交叉编译、ELF、大小 | ✅ 已验证（7.3 / 6.8 MiB） |
-| Dockerfile.hub / compose（hub） | ✅ 2026-11-05 在 WSL2 Ubuntu + Docker 29 实测：镜像 build、healthcheck、卷保留升级、数据与在线 agent 均正常 |
-| Dockerfile.agent / compose（agent） | ⚠️ 本次未实际 build/run（未指定巡检目录）；已知配置见 `deploy/agent.example.yaml` |
+| Dockerfile.hub / compose（hub） | ✅ 2026-11-05 在 WSL2 Ubuntu + Docker 29 实测：镜像 build、healthcheck、卷保留升级、数据与在线 agent 均正常；2026-11-15 Apple container 1.7.1 arm64 build + `/healthz` 通过，amd64（Rosetta）build + `/healthz` 通过 |
+| Dockerfile.agent / compose（agent） | ⚠️ 2026-11-15 在 Apple container 1.7.1 本地 arm64 build + hub/agent 端到端（注册/心跳/全量扫描/sentinel/状态卷）通过；compose 与群晖真机待验 |
+| Docker 镜像 CI（hub/agent × amd64/arm64 → Release tar） | ⚠️ workflow 已实现，待首次预发布 tag 验证 |
+| 群晖 Container Manager（镜像导入/项目/路径映射） | ❌ 未在真实 DSM 验证；模板与文档静态校验通过 |
 | systemd unit | ✅ 静态检查（本机无 systemd 环境，未实际启动） |
 | Windows agent / 桌面 exe | ✅ 构建、启动、单实例 |
 | Wails NSIS 打包 | ❌ 未验证（未安装 NSIS） |

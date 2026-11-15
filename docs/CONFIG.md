@@ -88,6 +88,7 @@ mounts:                       # 必填：至少一个
   - 本地 yaml/token 丢失但节点仍存在时，不需要删除节点：在 hub 机器行重新获取接入 token，agent 配置填该 token 即可回到原节点；GUI 首次向导可用「识别已有节点」自动填充 machine_id 与挂载点。
   - `state_dir` 默认：有 `token_file` 时为 token 文件所在目录；否则为 `.observer/<machine_id>`，其中保存 `state.db`（bbolt 缓存）、`spool.jsonl`（离线补发）与 `agent.token`。
   - 同一台机器跑多个 agent 时，用不同的 `machine_id` 即自动隔离；也可显式配置 `state_dir`。
+  - **容器/只读根文件系统**：必须显式配置 `state_dir`（如 `/var/lib/observer`）并挂载可写卷；若用 `OBSERVER_ENROLL_TOKEN` 而不是内联 `token`，还要显式配置 `token_file: /var/lib/observer/token`，否则配置校验会补上默认的 `.observer/token`，在只读根文件系统下注册成功后写 token 会失败。
 
 ## 3. 限速语义
 

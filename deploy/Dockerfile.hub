@@ -1,10 +1,36 @@
 # Observer hub（Node.js + SQLite + Web 控制台）
 # 构建上下文：仓库根目录；用法：
 #   docker build -f deploy/Dockerfile.hub -t observer-hub .
+#
+# 可选构建参数：
+#   VERSION               OCI label 的 version（默认 dev）
+#   REVISION              OCI label 的 revision（默认 unknown）
+#   NPM_REGISTRY          pnpm 使用的 registry；国内网络可传 https://registry.npmmirror.com/
+#   DEBIAN_MIRROR         apt 镜像主机名；国内网络可传 mirrors.tuna.tsinghua.edu.cn
+#   INSTALL_BUILD_TOOLS   1=装 node-gyp 兜底工具（默认）；0=跳过，依赖 better-sqlite3 prebuild
+#   BUILD_FROM_SOURCE     1=强制从源码编译 better-sqlite3（prebuild 下载失败时可用）
 
 # syntax=docker/dockerfile:1
 FROM node:22-bookworm-slim AS build
+ARG NPM_REGISTRY=https://registry.npmjs.org/
+ARG DEBIAN_MIRROR=
+ARG INSTALL_BUILD_TOOLS=1
+ARG BUILD_FROM_SOURCE=0
+ENV npm_config_registry=${NPM_REGISTRY}
+ENV npm_config_build_from_source=${BUILD_FROM_SOURCE}
+RUN if [ -n "$DEBIAN_MIRROR" ] && [ -f /etc/apt/sources.list.d/debian.sources ]; then \
+      sed -i "s|http://deb.debian.org|http://${DEBIAN_MIRROR}|g" /etc/apt/sources.list.d/debian.sources; \
+    fi
+# better-sqlite3 通常有 arm64/Node 22 prebuild；这里保留 node-gyp 兜底工具。
+# 在无法访问 Debian 镜像的构建环境可传 INSTALL_BUILD_TOOLS=0 跳过。
+RUN if [ "$INSTALL_BUILD_TOOLS" = "1" ]; then \
+      apt-get update \
+      && apt-get install -y --no-install-recommends python3 make g++ \
+      && rm -rf /var/lib/apt/lists/*; \
+    fi
 RUN corepack enable
+# 显式设置 registry：pnpm 对 npm_config_registry 的支持随版本而异。
+RUN pnpm config set registry "$NPM_REGISTRY"
 WORKDIR /app
 
 COPY pnpm-workspace.yaml pnpm-lock.yaml package.json tsconfig.base.json ./
@@ -17,6 +43,12 @@ COPY web ./web
 RUN pnpm --filter hub build && pnpm --filter web build
 
 FROM node:22-bookworm-slim
+ARG VERSION=dev
+ARG REVISION=unknown
+LABEL org.opencontainers.image.title="observer-hub" \
+      org.opencontainers.image.version="${VERSION}" \
+      org.opencontainers.image.revision="${REVISION}" \
+      org.opencontainers.image.source="https://github.com/Gemini2015/Observer"
 ENV NODE_ENV=production
 ENV OBSERVER_HOST=0.0.0.0
 ENV OBSERVER_DATA_DIR=/data

@@ -1,0 +1,67 @@
+# Observer agent 群晖示例配置
+#
+# 用法：复制为 agent.yaml 后修改。
+#   cp agent.example.yaml agent.yaml
+#
+# 注意：
+# - agent.yaml 含 token，已被仓库 .gitignore 忽略；不要提交。
+# - 容器使用只读根文件系统，state_dir 必须显式指向 /var/lib/observer。
+# - 如果改用 OBSERVER_ENROLL_TOKEN 环境变量而不是内联 token，还必须显式配置
+#   token_file: /var/lib/observer/token；否则默认的 .observer/token 会写到只读根目录。
+
+agent:
+  machine_id: synology-nas
+  label: Synology NAS
+
+  # 全栈 compose（hub + agent）填 http://hub:8787。
+  # 仅 agent（hub 在另一台机器）填 hub 的局域网 IP 或域名，不能写 127.0.0.1。
+  hub: http://hub:8787
+
+  # 在 hub Web「机器与挂载点 → 注册新机器」生成的一次性 token。
+  # 首次启动换取并缓存到 state_dir/agent.token；状态卷保留则无需重复注册。
+  token: "<paste-enroll-token>"
+
+  # 只读根文件系统下必须显式指定；不要用默认的 .observer/<machine_id>。
+  state_dir: /var/lib/observer
+
+mounts:
+  - id: photos
+    label: 照片
+    # 与 compose 的容器侧路径一致。本模板默认同路径映射：
+    #   /volume1/photo:/volume1/photo:ro
+    path: /volume1/photo
+
+    # 挂载守卫：文件必须位于共享文件夹根目录，内容需包含 mount id。
+    # 例如：echo "mount_id=photos" > /volume1/photo/.observer-mount
+    # 共享盘未挂载/加密未解锁时 agent 会跳过巡检，不产生 missing 误报。
+    sentinel: .observer-mount
+
+    fs_kind: local
+    read_only: true
+    repair_allowed: false
+    exclude:
+      - "**/.observer-mount"
+      - "**/@eaDir/**" # Synology 缩略图目录
+      - "**/#recycle/**" # 回收站
+      - "**/@Recently-Snapshot/**"
+      - "**/#snapshot/**"
+      - "**/.observer-quarantine/**"
+    schedule:
+      window: "01:00-06:00"
+      budget_minutes_per_day: 240
+      interval_minutes: 1440
+    limits:
+      bytes_per_sec: 50MiB
+      files_per_sec: 100
+
+  # 新增共享文件夹示例：
+  # - id: video
+  #   label: 视频
+  #   path: /volume1/video
+  #   sentinel: .observer-mount
+  #   read_only: true
+  #   repair_allowed: false
+  #   exclude:
+  #     - "**/.observer-mount"
+  #     - "**/@eaDir/**"
+  #     - "**/#recycle/**"

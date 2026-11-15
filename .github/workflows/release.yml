@@ -1,7 +1,7 @@
-name: Release agent
+name: Release agent and images
 
 # 开发者手动打 tag 并推送后触发（workflow 不创建/移动/删除任何 tag）：
-#   git tag -a v1.1.0 -m "observer-agent v1.1.0"
+#   git tag -a v1.1.0 -m "Observer v1.1.0"
 #   git push origin v1.1.0
 on:
   push:
@@ -20,6 +20,8 @@ jobs:
     name: Build and publish agent
     runs-on: ubuntu-24.04
     timeout-minutes: 20
+    outputs:
+      version: ${{ steps.version.outputs.version }}
 
     steps:
       - name: Checkout
@@ -59,7 +61,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name }}
-          name: observer-agent ${{ github.ref_name }}
+          name: Observer ${{ github.ref_name }}
           generate_release_notes: true
           prerelease: ${{ contains(github.ref_name, '-') }}
           fail_on_unmatched_files: true
@@ -67,3 +69,198 @@ jobs:
             dist/release/*.tar.gz
             dist/release/*.zip
             dist/release/SHA256SUMS
+
+  # 为群晖/离线导入构建单架构 Docker 镜像，并作为 Release 资产上传。
+  # 不推 Docker Hub/GHCR：镜像以 docker save 的 Docker archive tar 分发。
+  docker:
+    name: Docker ${{ matrix.image }} (${{ matrix.arch }})
+    needs: release
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: hub
+            dockerfile: deploy/Dockerfile.hub
+            tag: observer-hub
+            platform: linux/amd64
+            arch: amd64
+          - image: hub
+            dockerfile: deploy/Dockerfile.hub
+            tag: observer-hub
+            platform: linux/arm64
+            arch: arm64
+          - image: agent
+            dockerfile: deploy/Dockerfile.agent
+            tag: observer-agent
+            platform: linux/amd64
+            arch: amd64
+          - image: agent
+            dockerfile: deploy/Dockerfile.agent
+            tag: observer-agent
+            platform: linux/arm64
+            arch: arm64
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup QEMU
+        if: matrix.arch == 'arm64'
+        uses: docker/setup-qemu-action@v3
+
+      - name: Setup Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          platforms: ${{ matrix.platform }}
+          tags: ${{ matrix.tag }}:${{ needs.release.outputs.version }}
+          load: true
+          push: false
+          provenance: false
+          sbom: false
+          build-args: |
+            VERSION=${{ needs.release.outputs.version }}
+            REVISION=${{ github.sha }}
+            INSTALL_BUILD_TOOLS=1
+          cache-from: type=gha,scope=${{ matrix.image }}-${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.image }}-${{ matrix.arch }}
+
+      - name: Verify image architecture
+        shell: bash
+        run: |
+          set -euo pipefail
+          image="${{ matrix.tag }}:${{ needs.release.outputs.version }}"
+          got="$(docker image inspect "$image" --format '{{.Architecture}}')"
+          echo "image=$image architecture=$got expected=${{ matrix.arch }}"
+          [[ "$got" == "${{ matrix.arch }}" ]]
+
+      - name: Smoke test agent
+        if: matrix.image == 'agent'
+        shell: bash
+        run: |
+          set -euo pipefail
+          image="${{ matrix.tag }}:${{ needs.release.outputs.version }}"
+          got="$(docker run --rm "$image" version)"
+          echo "observer-agent version: $got"
+          [[ "$got" == "${{ needs.release.outputs.version }}" ]]
+
+      - name: Smoke test hub
+        if: matrix.image == 'hub'
+        shell: bash
+        run: |
+          set -euo pipefail
+          image="${{ matrix.tag }}:${{ needs.release.outputs.version }}"
+          name="observer-hub-smoke-${GITHUB_RUN_ID}-${GITHUB_JOB}"
+          volume="observer-hub-smoke-${GITHUB_RUN_ID}-${GITHUB_JOB}"
+          cleanup() {
+            docker rm -f "$name" >/dev/null 2>&1 || true
+            docker volume rm "$volume" >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+
+          docker run -d --name "$name" \
+            -e OBSERVER_HOST=127.0.0.1 \
+            -e OBSERVER_DATA_DIR=/data \
+            -e OBSERVER_ADMIN_PASSWORD=smoke-test-password \
+            -p 127.0.0.1:18787:8787 \
+            -v "$volume:/data" \
+            "$image"
+
+          for attempt in $(seq 1 120); do
+            if curl -fsS http://127.0.0.1:18787/healthz >/dev/null 2>&1; then
+              echo "hub healthy after ${attempt} attempt(s)"
+              curl -fsS http://127.0.0.1:18787/ >/dev/null
+              exit 0
+            fi
+            sleep 2
+          done
+
+          echo "hub did not become healthy" >&2
+          docker logs "$name" >&2 || true
+          exit 1
+
+      - name: Save image archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${{ needs.release.outputs.version }}"
+          image="${{ matrix.tag }}:${version}"
+          asset="${{ matrix.tag }}_${version}_linux_${{ matrix.arch }}.tar"
+          mkdir -p dist/docker
+
+          docker save -o "dist/docker/$asset" "$image"
+
+          # 群晖 Container Manager 使用 Docker archive；先做一次 load 回归。
+          docker load -i "dist/docker/$asset"
+          tar -tf "dist/docker/$asset" >"dist/docker/$asset.list"
+          grep -qE '(^|/)manifest\.json$' "dist/docker/$asset.list"
+          rm -f "dist/docker/$asset.list"
+
+          limit=$((2 * 1024 * 1024 * 1024))
+          size="$(stat -c%s "dist/docker/$asset")"
+          if (( size >= limit )); then
+            echo "error: $asset is ${size} bytes, GitHub Release asset limit is 2 GiB" >&2
+            exit 1
+          fi
+
+          ( cd dist/docker && sha256sum "$asset" > "$asset.sha256" )
+          ls -lh "dist/docker/$asset"
+          echo "ASSET=$asset" >>"$GITHUB_ENV"
+
+      - name: Upload checksum fragment
+        uses: actions/upload-artifact@v4
+        with:
+          name: sha-${{ matrix.image }}-${{ matrix.arch }}
+          path: dist/docker/*.sha256
+          retention-days: 3
+          if-no-files-found: error
+
+      - name: Upload image to release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release upload "$GITHUB_REF_NAME" \
+            "dist/docker/${ASSET}" \
+            "dist/docker/${ASSET}.sha256" \
+            --clobber
+
+  docker-checksums:
+    name: Publish image checksums
+    needs: docker
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download checksum fragments
+        uses: actions/download-artifact@v4
+        with:
+          pattern: sha-*
+          path: sums
+          merge-multiple: true
+
+      - name: Combine checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          ls -l sums
+          cat sums/*.sha256 | sort -k2 > SHA256SUMS-docker
+          cat SHA256SUMS-docker
+
+      - name: Upload checksums to release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release upload "$GITHUB_REF_NAME" SHA256SUMS-docker --clobber

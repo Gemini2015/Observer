@@ -66,7 +66,7 @@ pwsh ./scripts/bench.ps1 -Files 200 -SizeBytes 1048576   # 1MB × 200
 | `bench.ps1`（1MB×200） | 240 files/s，240.7 MiB/s，RSS 16.8 MiB |
 | Linux 交叉编译 | amd64 7.3 MiB / arm64 6.8 MiB（ELF） |
 
-未在本机验证：Docker 镜像构建、systemd 实际运行、NSIS 安装包、macOS 构建/签名/公证（见 [DEPLOY §7](DEPLOY.md#7-本机验证状态)）。
+未在本机验证：systemd 实际运行、NSIS 安装包、macOS 构建/签名/公证、群晖 Container Manager 真机导入（Docker 镜像的 arm64 构建/运行见 §8；CI 双架构与 Docker archive 见 [RELEASE](RELEASE.md)）。
 
 > 2026-11-05 Web 控制台改造：`pnpm --filter web typecheck` / `test`（23 项）/ `build` 与 `pnpm --filter hub test`（21 文件/73 项）通过；UI 手动验收见 §7。本次未重跑 drill（未改 agent 与协议）。
 
@@ -110,3 +110,81 @@ pnpm --filter web dev        # 终端 B：打开 http://127.0.0.1:5173（/api �
 | 15 | `/repairs` | 有记录时展示源→目标与进度，进行中可取消 |
 | 16 | `/system` | 版本/运行时长/调度参数/数据库规模正确，注册 token 可生成 |
 | 17 | 会话过期 | 任一请求 401 后回到登录页；重新登录回到原路由 |
+
+## 8. Docker 镜像本地冒烟（Apple container）
+
+macOS 26+ 可用 Apple `container` 在没有 Docker 的机器上验证镜像（arm64 原生；amd64 通过 builder/Rosetta）。它不能替代 CI 的 Docker archive 校验，也不能替代群晖 Container Manager 导入。
+
+```bash
+# 1. 启动服务（首次会下载内核/builder）
+container system start --enable-kernel-install
+
+# 2. agent（arm64）；国内网络加 GOPROXY 镜像
+container build \
+  --build-arg GOPROXY=https://goproxy.cn,direct \
+  --build-arg VERSION=1.0.0-local \
+  -f deploy/Dockerfile.agent -t observer-agent:local .
+container run --rm observer-agent:local version       # 输出 1.0.0-local
+
+# 3. hub（arm64）；国内网络用 npm/apt 镜像
+container build \
+  --build-arg NPM_REGISTRY=https://registry.npmmirror.com/ \
+  --build-arg DEBIAN_MIRROR=mirrors.tuna.tsinghua.edu.cn \
+  --build-arg INSTALL_BUILD_TOOLS=1 \
+  --build-arg BUILD_FROM_SOURCE=1 \
+  --build-arg VERSION=1.0.0-local \
+  -f deploy/Dockerfile.hub -t observer-hub:local .
+
+# 4. amd64（Rosetta）
+container build --platform linux/amd64 \
+  --build-arg GOPROXY=https://goproxy.cn,direct \
+  -f deploy/Dockerfile.agent -t observer-agent:local-amd64 .
+container run --rm --arch amd64 --rosetta observer-agent:local-amd64 version
+```
+
+端到端（hub + agent）用 Apple container network/volume 模拟群晖：创建 `observer-e2e` network，hub 和 agent 都加入该 network；从 `container ls` 取 hub 的 IP，agent 配置 `hub: http://<hub-ip>:8787`（Apple container 的 `alias` 要求 FQDN，本版本测试未解析，直接用 IP 最稳）。`state_dir: /var/lib/observer`，媒体目录用 `--mount type=bind,...,readonly`，根文件系统 `--read-only`，用户 `--uid 65532 --gid 65532`。
+
+Apple container 1.7.1 本机测试中 `-p` 端口发布不可达，所以注册 token 直接在 hub 容器内用 Node fetch 调 API（Docker / 群晖的端口发布正常）：
+
+```bash
+container exec -i observer-hub-test node - <<'EOF'
+const base = 'http://127.0.0.1:8787';
+const login = await fetch(base + '/api/v1/auth/login', {
+  method: 'POST',
+  headers: { 'content-type': 'application/json' },
+  body: JSON.stringify({ password: 'test-password' }),
+});
+const cookie = (login.headers.getSetCookie?.() ?? [login.headers.get('set-cookie')])[0].split(';')[0];
+const r = await fetch(base + '/api/v1/enroll-tokens', {
+  method: 'POST',
+  headers: { 'content-type': 'application/json', cookie },
+  body: JSON.stringify({ machine_hint: 'synology-test', ttl_hours: 1 }),
+});
+console.log((await r.json()).token);
+EOF
+```
+
+触发扫描同理：在 hub 容器内 `POST /api/v1/mounts/<id>/scan`，body `{"mode":"full"}`；用 `GET /api/v1/jobs/<id>` 和 `/api/v1/files?machine_id=synology-test` 验证结果。
+
+注意：
+
+- `container image save` 输出 **OCI tar**；群晖导入物是 `docker save` 的 **Docker archive**，由 CI 生成并用 `docker load` 回归。
+- Apple container 没有 Compose；`deploy/synology/*.yml` 只做 YAML 静态校验，最终在群晖 Container Manager 验证。
+- Apple container 的 bind mount 走 VirtioFS，宿主权限与 DSM ACL 不同；非 root 读取失败时可临时用 root 完成端到端，但不要把该结论当作群晖权限结论。
+- Apple container 当前 bind mount 的 source 必须是目录；本地测试把 `agent.yaml` 放在目录里挂载（Synology/Docker 可以直接挂单个文件）。
+- 测试只创建 `observer-*-test` / `observer-e2e-*` 资源；不要执行全局 prune。
+
+本次本地结果（2026-11-15，macOS 27.0.1 arm64，Apple container 1.7.1）：
+
+| 项 | 结果 |
+| --- | --- |
+| agent arm64 构建 | ✅ `observer-agent:local`，`version` 输出 `1.0.0-local` |
+| hub arm64 构建 | ✅ `observer-hub:local`（`better-sqlite3` 源码编译路径） |
+| hub `/healthz` 与 Web 根路径 | ✅ 容器内 `fetch` 正常 |
+| hub + agent 注册/心跳/挂载同步 | ✅ machine `synology-test` 在线，mount `photos` active |
+| 全量扫描 | ✅ `seen=2 hashed=2`，文件入库 |
+| sentinel 掉盘保护 | ✅ 移除 sentinel 后 `seen=0`，无 missing 误报；恢复后再次 `seen=2` |
+| 非 root + 只读根文件系统 + 状态卷 | ✅ UID 65532 可写 `/var/lib/observer`，重启后 token 保留 |
+| OCI save/load | ✅ `container image save/load` 自洽；**不是** Docker archive |
+| amd64 | ✅ agent build + `version`；hub build + `/healthz`（`--arch amd64 --rosetta`）；CI 仍用 QEMU 并做 `docker save`/`docker load` 回归 |
+| `doctor` | ⚠️ 运行中的 agent 占用状态缓存，直接 exec 会 `open state cache: timeout`；需停止 agent 后用一次性容器运行 |

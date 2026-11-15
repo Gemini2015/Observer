@@ -9,6 +9,7 @@
 | `observer-agent.service` | systemd unit（`Restart=on-failure`、ProtectSystem、只读媒体） |
 | `agent.example.yaml` | NAS agent 配置示例（只读挂载、调度窗口、限速） |
 | `build-linux.ps1` | Windows 上交叉编译 Linux amd64/arm64 agent 并校验 ELF/大小 |
+| `synology/` | 群晖 Container Manager 模板（hub+agent / 仅 agent / agent 配置） |
 
 ## 快速开始（NAS）
 
@@ -42,6 +43,7 @@ docker compose up -d --build
 
 ## 说明
 
-- `Dockerfile.hub` 与 compose（hub）已在 WSL2 Ubuntu + Docker 29 实测 build/run；`Dockerfile.agent` 本次未实际 build（未指定巡检目录）。
+- `Dockerfile.hub` 与 compose（hub）已在 WSL2 Ubuntu + Docker 29 实测 build/run；`Dockerfile.agent` 2026-11-15 在 Apple container 1.7.1 本地 arm64 build + 冒烟通过（群晖真机待验）。
+- 群晖部署不用在 NAS 上 build：Release 会附带 amd64/arm64 的 hub/agent `docker save` tar，导入后使用 `synology/` 模板。见 [docs/DEPLOY-SYNOLOGY.md](../docs/DEPLOY-SYNOLOGY.md)。
 - 本机/单机可用 `deploy/docker-compose.local.yml` 覆盖端口、镜像名与外部数据卷，主 compose 保持 NAS 默认；示例见 [docs/DEPLOY.md §3](../docs/DEPLOY.md#3-nas--服务器docker-compose)。
 - macOS 打包/签名/公证见 [docs/DEPLOY.md](../docs/DEPLOY.md)。
