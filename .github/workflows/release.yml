@@ -153,9 +153,13 @@ jobs:
     timeout-minutes: 5
 
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
       - name: Merge binary checksums
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
           version="${{ needs.release.outputs.version }}"
@@ -184,6 +188,7 @@ jobs:
       - name: Prepend asset guide to release notes
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
           version="${{ needs.release.outputs.version }}"
